@@ -41,6 +41,7 @@ AS/
 
 ## 3. Install Dependencies
 MORE THINGS WILL HAVE TO BE INSTALLED, PUT THEM IN REQUIREMENTS.txt AS THE NEED ARISES
+
 Install the required packages using `pip`:
 
 ```bash
