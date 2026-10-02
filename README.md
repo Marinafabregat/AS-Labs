@@ -61,3 +61,31 @@ Start the  server using **Uvicorn** with the reload flag enabled (so changes upd
 uvicorn main:app --reload
 ```
 
+## 5. Create and install a server certificate
+Install Openssl
+```
+mkdir certs
+openssl req -x509 -newkey rsa:2048 -keyout certs/server.key -out certs/server.crt -sha256 -days 365 -nodes
+```
+And insert in Common Name "localhost".
+
+### TODO:
+```
+import uvicorn
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def root():
+    return {"message": "Hello HTTPS"}
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=8000,
+        ssl_keyfile="certs/server.key",
+        ssl_certfile="certs/server.crt",
+    )
+```
