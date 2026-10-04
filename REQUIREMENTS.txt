@@ -5,3 +5,12 @@ pyjwt
 requests
 python-dotenv
 jinja2
+pytest
+pytest-cov
+httpx
+sqlmodel
+passlib
+#bcrypt
+passlib[argon2]
+pytest-asyncio
+python-multipart

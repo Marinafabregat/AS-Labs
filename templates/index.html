@@ -1,13 +1,32 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>FIRST PAGE</title>
-    <link rel="stylesheet" href="/static/styles.css">
-    <link rel="icon" href="/static/icon.png" type="image/png">
-</head>
-<body>
+{% extends "base.html" %}
 
-    <h1> Hello! </h1>
+{% block title %}Home - VINSEC Marketplace{% endblock %}
 
-</body>
-</html>
+{% block content %}
+  <h1>Welcome to the VINSEC Marketplace Platform</h1>
+
+  {% if user %}
+    <p>Hello, {{ user.username }}! <a href="/items">Browse items</a>.</p>
+    <!-- TEMPORARY DEBUG; TODO REMOVE-->
+    <p>DEBUG - Role: {{ user.role }} | Value: {{ user.role.value }}</p>
+    {% if user.role.value == 'USER' %}
+      <form action="/users/mod-petition" method="post">
+        <label for="message" style="font-size: larger; text-align: center;">Would you like to join the staff?</label>
+        <textarea name="message" placeholder="Why should you be a moderator?" rows="2"></textarea>
+        <button type="submit">Petition to Become Moderator</button>
+      </form>
+    {% endif %}
+    {% if user.role.value == 'admin' %}
+      <p> Here will be some admin specific things</p>
+    {% endif %}
+    {% if user.role.value == 'MODERATOR' %}
+      <p> Here will be some mod specific things</p>
+    {% endif %}
+  {% else %}
+    <p><a href="/users/login">Login</a> or <a href="/users/register">Register</a> to view items and start exploring!</p>
+  {% endif %}
+
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+{% endblock %}
