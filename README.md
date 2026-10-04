@@ -21,6 +21,8 @@ AS/
 ├── service.py
 ├── REQUIREMENTS.txt
 ├── .env
+├── uploads/
+│   └── images or other files (this we have to encrypt)
 ├── routes/
 │   └── admin.py,items.py,mod.py,users.py
 ├── static/
