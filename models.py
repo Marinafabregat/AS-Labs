@@ -37,12 +37,18 @@ class ReportStatus(str, Enum):
 
 class User(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    username: str = Field(index=True, unique=True)
-    email: str = Field(nullable=False, unique=True)
-    hashed_password: str
+    username: Optional[str] = Field(default=None, index=True, unique=True)
+    email: str = Field(nullable=False, unique=True, index=True)
+    hashed_password: Optional[str] = Field(default=None)
     role: UserRole = Field(default=UserRole.USER)
     is_blacklisted: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # OAuth fields
+    oauth_provider: Optional[str] = Field(default=None)
+    oauth_id: Optional[str] = Field(default=None, index=True)
+    oauth_access_token: Optional[str] = Field(default=None)
+    oauth_refresh_token: Optional[str] = Field(default=None)
 
     # Relationships
     posted_items: List["Item"] = Relationship(

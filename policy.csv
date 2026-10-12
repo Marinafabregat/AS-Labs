@@ -1,0 +1,13 @@
+p, admin, *, *
+p, moderator, item, read
+p, moderator, item, report
+p, moderator, user, read
+p, user, item, read
+p, user, item, create
+p, user, item, like
+p, user, item, purchase
+p, user, profile, read
+p, user, profile, update
+p, user, mod_petition, create
+g, moderator, user
+g, admin, moderator

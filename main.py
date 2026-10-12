@@ -5,12 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
-import jwt
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Form, Depends
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import JSONResponse,RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,10 +23,8 @@ from models import Base, User
 
 from db import engine, init_db, get_session
 from models import Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
-from auth import hash_password, verify_password, get_current_user, require_admin, get_current_user_optional
-#TODO OTHER ROUTES
-#from routes import admin, items, mod, users
-from routes import users
+from auth import hash_password, verify_password, get_current_user, get_current_user_optional
+from routes import users, auth
 from datetime import datetime
 
 
@@ -58,12 +56,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-in-production"),
+    https_only=False,
+    same_site="lax",
+)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(users.router)
+app.include_router(auth.router)
 #app.include_router(items.router)
 #app.include_router(mod.router)
 #app.include_router(admin.router)

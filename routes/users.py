@@ -7,7 +7,6 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from auth import (
-    create_access_token,
     get_current_active_user,
     get_current_user,
     hash_password,
@@ -20,12 +19,12 @@ router = APIRouter(prefix="/users", tags=["Users"])
 templates = Jinja2Templates(directory="templates")
 
 
-#  REGISTER 
+# REGISTER
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     """Render the registration HTML form."""
-    return templates.TemplateResponse(request, "register.html")
+    return templates.TemplateResponse(request, "users/register.html")
 
 
 @router.post("/register")
@@ -45,7 +44,7 @@ async def register_user(
     if existing_user:
         return templates.TemplateResponse(
             request,
-            "register.html",
+            "users/register.html",
             {
                 "error": "Username or email is already registered.",
                 "username": username,
@@ -64,8 +63,10 @@ async def register_user(
 
     session.add(new_user)
     session.commit()
+    session.refresh(new_user)
 
-    return RedirectResponse(url="/users/login?registered=true", status_code=status.HTTP_302_FOUND)
+    request.session["user_id"] = str(new_user.id)
+    return RedirectResponse(url="/users/profile", status_code=status.HTTP_302_FOUND)
 
 
 # LOGIN & LOGOUT
@@ -74,25 +75,24 @@ async def register_user(
 async def login_page(request: Request, registered: Optional[bool] = None):
     """Render the login HTML form."""
     return templates.TemplateResponse(
-        request, "login.html", {"registered": registered}
+        request, "users/login.html", {"registered": registered}
     )
 
 
 @router.post("/login")
 async def login_user(
     request: Request,
-    response: Response,
     username: str = Form(...),
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Authenticate user and store access token in secure HTTP-only cookie."""
+    """Authenticate user and store user_id in session."""
     user = session.exec(select(User).where(User.username == username)).first()
 
-    if not user or not verify_password(password, user.hashed_password):
+    if not user or not user.hashed_password or not verify_password(password, user.hashed_password):
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "users/login.html",
             {"error": "Invalid username or password."},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
@@ -100,31 +100,20 @@ async def login_user(
     if user.is_blacklisted:
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "users/login.html",
             {"error": "Account is blacklisted. Access denied."},
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
-    access_token = create_access_token(user)
-
-    redirect_response = RedirectResponse(
-        url="/users/profile", status_code=status.HTTP_302_FOUND
-    )
-    redirect_response.set_cookie(
-        key="access_token",
-        value=f"Bearer {access_token}",
-        httponly=True,
-        samesite="lax",
-    )
-    return redirect_response
+    request.session["user_id"] = str(user.id)
+    return RedirectResponse(url="/users/profile", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/logout")
-async def logout():
-    """Clear session cookie and redirect to login."""
-    response = RedirectResponse(url="/users/login", status_code=status.HTTP_302_FOUND)
-    response.delete_cookie("access_token")
-    return response
+async def logout(request: Request):
+    """Clear session and redirect to login."""
+    request.session.clear()
+    return RedirectResponse(url="/users/login", status_code=status.HTTP_302_FOUND)
 
 
 # PROFILE & UPDATE
@@ -136,7 +125,7 @@ async def profile_page(
 ):
     """Display profile page for authenticated, non-blacklisted user."""
     return templates.TemplateResponse(
-        request, "profile.html", {"user": current_user}
+        request, "users/profile.html", {"user": current_user}
     )
 
 
@@ -157,7 +146,7 @@ async def update_profile(
         if email_check:
             return templates.TemplateResponse(
                 request,
-                "profile.html",
+                "users/profile.html",
                 {
                     "user": current_user,
                     "error": "Email is already in use by another account.",
@@ -177,7 +166,7 @@ async def update_profile(
 
     return templates.TemplateResponse(
         request,
-        "profile.html",
+        "users/profile.html",
         {
             "user": current_user,
             "success": "Profile updated successfully!",
@@ -185,7 +174,7 @@ async def update_profile(
     )
 
 
-# --- MODERATOR PETITION ---
+# MODERATOR PETITION
 
 @router.get("/mod-petition", response_class=HTMLResponse)
 async def mod_petition_page(
@@ -200,7 +189,7 @@ async def mod_petition_page(
 
     return templates.TemplateResponse(
         request,
-        "mod_petition.html",
+        "users/mod_petition.html",
         {
             "user": current_user,
             "petition": existing_petition,
@@ -219,7 +208,7 @@ async def submit_mod_petition(
     if current_user.role != UserRole.USER:
         return templates.TemplateResponse(
             request,
-            "mod_petition.html",
+            "users/mod_petition.html",
             {
                 "user": current_user,
                 "error": "You are already a moderator or admin.",
@@ -234,7 +223,7 @@ async def submit_mod_petition(
     if existing_petition:
         return templates.TemplateResponse(
             request,
-            "mod_petition.html",
+            "users/mod_petition.html",
             {
                 "user": current_user,
                 "petition": existing_petition,
@@ -255,7 +244,7 @@ async def submit_mod_petition(
     )
 
 
-# --- DELETE ACCOUNT ---
+# DELETE ACCOUNT
 
 @router.post("/delete")
 async def delete_account(

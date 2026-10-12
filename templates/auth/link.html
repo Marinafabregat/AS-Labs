@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Link Account{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <h1>Link Google Account</h1>
+
+    <p>An account with email <strong>{{ oauth_data.email }}</strong> already exists.</p>
+
+    <p>Do you want to link your Google account to this existing account?</p>
+
+    <form method="post" action="/auth/link">
+        <button type="submit" class="btn btn-primary">Yes, Link Accounts</button>
+        <a href="/auth/login" class="btn btn-secondary">No, Create New Account</a>
+    </form>
+</div>
+{% endblock %}
