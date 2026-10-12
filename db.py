@@ -2,7 +2,10 @@ from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Category, Item, Purchase, Like, ItemReport, ModPetition
 import os
 # Define our SQLite
-sqlite_file_name = "database.db"
+# For Docker usage:
+sqlite_file_name = "/app/database.db"
+# For local usage:
+# sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 connect_args = {"check_same_thread": False}
 
