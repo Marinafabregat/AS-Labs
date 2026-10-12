@@ -77,11 +77,43 @@ pip install -r REQUIREMENTS.txt
 
 ## 4. Running the Application
 
-Start the  server using **Uvicorn** with the reload flag enabled (so changes update automatically):
+### Local Development
+
+Start the server using **Uvicorn** with the reload flag enabled (so changes update automatically):
 
 ```bash
 uvicorn main:app --reload
 ```
+
+### With Docker
+
+**Prerequisites:** Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+
+1. **Build and start the container:**
+   ```bash
+   docker compose up --build -d
+   ```
+
+2. **Access the app at:** http://localhost:8000
+
+3. **View logs:**
+   ```bash
+   docker compose logs -f
+   ```
+
+4. **Stop the container:**
+   ```bash
+   docker compose down
+   ```
+
+**Persistence:** The following are persisted on the host via bind mounts:
+- `database.db` - SQLite database
+- `uploads/` - User uploaded files
+- `.env` - Environment variables (mounted read-only)
+- Source code - Live reload via bind mount
+
+**Note:** For local development without Docker, comment line 6 and uncomment line 8 in `db.py` to use relative path `database.db`.
+
 ## 5. Create and install a server certificate
 Install Openssl
 ```
