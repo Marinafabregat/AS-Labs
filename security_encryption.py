@@ -1,12 +1,15 @@
 import os
+import base64
 from typing import Optional
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
-#PII STRING ENCRYPTION (Fernet / AES-128-CBC)
+# 1. PII STRING ENCRYPTION (Fernet / AES-128-CBC)
 
 PII_KEY = os.getenv("PII_ENCRYPTION_KEY", Fernet.generate_key())
+if isinstance(PII_KEY, str):
+    PII_KEY = PII_KEY.encode("utf-8")
 fernet = Fernet(PII_KEY)
 
 def encrypt_pii(text: Optional[str]) -> Optional[str]:
@@ -24,10 +27,19 @@ def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
 
 
 
-#ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM)
+# 2 ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM)
 
-# AESGCM requires a 256-bit key (32 bytes)
-IMAGE_KEY = os.getenv("IMAGE_ENCRYPTION_KEY", AESGCM.generate_key(bit_length=256))
+raw_image_key = os.getenv("IMAGE_ENCRYPTION_KEY")
+
+if raw_image_key:
+    try:
+        # Decode the Base64 string from .env back into 32 raw bytes
+        IMAGE_KEY = base64.b64decode(raw_image_key)
+    except Exception:
+        IMAGE_KEY = raw_image_key.encode("utf-8")
+else:
+    IMAGE_KEY = AESGCM.generate_key(bit_length=256)
+
 aesgcm = AESGCM(IMAGE_KEY)
 
 def encrypt_image(image_bytes: bytes) -> bytes:
