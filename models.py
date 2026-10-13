@@ -43,6 +43,14 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.USER)
     is_blacklisted: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # Encrypted PII Delivery Fields
+    delivery_address_line1: Optional[str] = None
+    delivery_address_line2: Optional[str] = None
+    postal_code: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    phone_number: Optional[str] = None
 
     # OAuth fields
     oauth_provider: Optional[str] = Field(default=None)

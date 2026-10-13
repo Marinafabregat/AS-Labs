@@ -14,6 +14,7 @@ from auth import (
 )
 from db import get_session
 from models import ModPetition, User, UserRole
+from security_encryption import encrypt_pii, decrypt_pii
 
 router = APIRouter(prefix="/users", tags=["Users"])
 templates = Jinja2Templates(directory="templates")
@@ -26,17 +27,15 @@ async def register_page(request: Request):
     """Render the registration HTML form."""
     return templates.TemplateResponse(request, "users/register.html")
 
-
 @router.post("/register")
 async def register_user(
     request: Request,
     username: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
-    delivery_address: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
-    """Handle user registration."""
+    """Handle user registration without PII delivery data."""
     existing_user = session.exec(
         select(User).where((User.username == username) | (User.email == email))
     ).first()
@@ -57,7 +56,6 @@ async def register_user(
         username=username,
         email=email,
         hashed_password=hash_password(password),
-        delivery_address=delivery_address if delivery_address else None,
         role=UserRole.USER,
     )
 
@@ -123,9 +121,20 @@ async def profile_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
 ):
-    """Display profile page for authenticated, non-blacklisted user."""
+    """Display profile page with decrypted PII delivery info for the user."""
+    # Decrypt sensitive fields for template rendering view
+    user_data = {
+        **current_user.model_dump(),
+        "delivery_address_line1": decrypt_pii(current_user.delivery_address_line1),
+        "delivery_address_line2": decrypt_pii(current_user.delivery_address_line2),
+        "postal_code": decrypt_pii(current_user.postal_code),
+        "city": decrypt_pii(current_user.city),
+        "country": decrypt_pii(current_user.country),
+        "phone_number": decrypt_pii(current_user.phone_number),
+    }
+
     return templates.TemplateResponse(
-        request, "users/profile.html", {"user": current_user}
+        request, "users/profile.html", {"user": user_data}
     )
 
 
@@ -133,12 +142,17 @@ async def profile_page(
 async def update_profile(
     request: Request,
     email: str = Form(...),
-    delivery_address: Optional[str] = Form(None),
+    address_line1: Optional[str] = Form(None),
+    address_line2: Optional[str] = Form(None),
+    postal_code: Optional[str] = Form(None),
+    city: Optional[str] = Form(None),
+    country: Optional[str] = Form(None),
+    phone_number: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Update profile details (email, address, or password)."""
+    """Update profile details and encrypt sensitive delivery PII before committing."""
     if email != current_user.email:
         email_check = session.exec(
             select(User).where(User.email == email, User.id != current_user.id)
@@ -155,7 +169,13 @@ async def update_profile(
             )
         current_user.email = email
 
-    current_user.delivery_address = delivery_address if delivery_address else None
+    # Encrypt each PII field before saving to DB
+    current_user.delivery_address_line1 = encrypt_pii(address_line1)
+    current_user.delivery_address_line2 = encrypt_pii(address_line2)
+    current_user.postal_code = encrypt_pii(postal_code)
+    current_user.city = encrypt_pii(city)
+    current_user.country = encrypt_pii(country)
+    current_user.phone_number = encrypt_pii(phone_number)
 
     if password and password.strip():
         current_user.hashed_password = hash_password(password)
@@ -164,12 +184,23 @@ async def update_profile(
     session.commit()
     session.refresh(current_user)
 
+    # Prepare decrypted user view for template response
+    user_data = {
+        **current_user.model_dump(),
+        "delivery_address_line1": address_line1,
+        "delivery_address_line2": address_line2,
+        "postal_code": postal_code,
+        "city": city,
+        "country": country,
+        "phone_number": phone_number,
+    }
+
     return templates.TemplateResponse(
         request,
         "users/profile.html",
         {
-            "user": current_user,
-            "success": "Profile updated successfully!",
+            "user": user_data,
+            "success": "Profile and delivery info updated securely!",
         },
     )
 
