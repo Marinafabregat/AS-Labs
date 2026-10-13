@@ -1,4 +1,5 @@
 import io
+import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,7 @@ from sqlmodel import Session, select
 
 from auth import get_current_active_user, get_current_user_optional
 from db import get_session
-from models import Category, Item, Like, Purchase, User, ItemReport
+from models import Category, Item, ItemReport, Like, Purchase, User
 
 # All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
@@ -28,7 +29,35 @@ ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 FORMAT_TO_EXT = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
 
+def sanitize_filename(filename: str) -> str:
+    """Conserva el nombre original del archivo limpiándolo de caracteres inseguros
+
+    (Path Traversal) y evita colisiones añadiendo sufijos numéricos.
+    """
+    path = Path(filename)
+    stem = path.stem
+    ext = path.suffix.lower()
+
+    # Reemplazar espacios y caracteres no alfanuméricos por guiones bajos
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", stem)
+    if not safe_stem:
+        safe_stem = "upload"
+
+    safe_name = f"{safe_stem}{ext}"
+    destination_path = UPLOAD_DIR / safe_name
+
+    # Evitar sobrescribir fotos existentes con el mismo nombre
+    counter = 1
+    while destination_path.exists():
+        safe_name = f"{safe_stem}_{counter}{ext}"
+        destination_path = UPLOAD_DIR / safe_name
+        counter += 1
+
+    return safe_name
+
+
 # --- 1. RUTAS ESTÁTICAS ---
+
 
 # Publish item page (GET)
 @router.get("/create", response_class=HTMLResponse)
@@ -107,8 +136,6 @@ async def create_item(
         if real_format not in ALLOWED_FORMATS:
             raise ValueError("Unsupported format")
 
-        safe_ext = FORMAT_TO_EXT.get(real_format, file_ext)
-
     except Exception:
         return templates.TemplateResponse(
             request,
@@ -121,7 +148,8 @@ async def create_item(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    image_filename = f"{uuid.uuid4()}{safe_ext}"
+    # Sanitizar y conservar el nombre original del archivo
+    image_filename = sanitize_filename(image.filename)
     file_path = UPLOAD_DIR / image_filename
     img.save(file_path)
 
@@ -157,7 +185,6 @@ async def liked_items_page(
     liked_item_ids = [like.item_id for like in likes]
     items = []
     if liked_item_ids:
-        # Se eliminó la restricción de is_blacklisted == False
         items = session.exec(
             select(Item).where(Item.id.in_(liked_item_ids))
         ).all()
@@ -223,7 +250,8 @@ async def my_items_page(
     )
 
 
-# --- 2. RUTAS DINÁMICAS (EDICIÓN, BORRADO Y DETALLES) ---
+# --- 2. RUTAS DINÁMICAS (EDICIÓN, BORRADO, REPORTE Y DETALLES) ---
+
 
 @router.get("/{item_id}/edit", response_class=HTMLResponse)
 async def edit_item_page(
@@ -237,13 +265,18 @@ async def edit_item_page(
         raise HTTPException(status_code=404, detail="Item not found")
 
     if item.seller_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You are not authorized to edit this item")
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to edit this item"
+        )
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
     if already_bought:
-        raise HTTPException(status_code=400, detail="Cannot edit a product that has already been sold")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit a product that has already been sold",
+        )
 
     categories = session.exec(select(Category)).all()
     return templates.TemplateResponse(
@@ -271,13 +304,18 @@ async def edit_item(
         raise HTTPException(status_code=404, detail="Item not found")
 
     if item.seller_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You are not authorized to edit this item")
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to edit this item"
+        )
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
     if already_bought:
-        raise HTTPException(status_code=400, detail="Cannot edit a product that has already been sold")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit a product that has already been sold",
+        )
 
     categories = session.exec(select(Category)).all()
 
@@ -320,8 +358,6 @@ async def edit_item(
             if real_format not in ALLOWED_FORMATS:
                 raise ValueError("Unsupported format")
 
-            safe_ext = FORMAT_TO_EXT.get(real_format, file_ext)
-
         except Exception:
             return templates.TemplateResponse(
                 request,
@@ -335,12 +371,16 @@ async def edit_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        if item.image_filename:
+        # Borrar foto anterior solo si no pertenece a los datos semilla iniciales
+        if item.image_filename and item.image_filename not in [
+            "keyboard.jpg",
+            "textbook.jpg",
+        ]:
             old_file_path = UPLOAD_DIR / item.image_filename
             if old_file_path.exists() and old_file_path.is_file():
                 old_file_path.unlink()
 
-        new_filename = f"{uuid.uuid4()}{safe_ext}"
+        new_filename = sanitize_filename(image.filename)
         new_file_path = UPLOAD_DIR / new_filename
         img.save(new_file_path)
         item.image_filename = new_filename
@@ -371,19 +411,28 @@ async def delete_item(
         raise HTTPException(status_code=404, detail="Item not found")
 
     if item.seller_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You are not authorized to delete this item")
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to delete this item",
+        )
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
     if already_bought:
-        raise HTTPException(status_code=400, detail="Cannot delete a product that has already been sold")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a product that has already been sold",
+        )
 
     likes = session.exec(select(Like).where(Like.item_id == item_id)).all()
     for like in likes:
         session.delete(like)
 
-    if item.image_filename:
+    if item.image_filename and item.image_filename not in [
+        "keyboard.jpg",
+        "textbook.jpg",
+    ]:
         file_path = UPLOAD_DIR / item.image_filename
         if file_path.exists() and file_path.is_file():
             file_path.unlink()
@@ -394,6 +443,7 @@ async def delete_item(
     return RedirectResponse(
         url="/items/my-items", status_code=status.HTTP_302_FOUND
     )
+
 
 # Report Item (POST)
 @router.post("/{item_id}/report")
@@ -407,11 +457,11 @@ async def report_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    # Un usuario no debería reportar su propio anuncio
     if item.seller_id == current_user.id:
-        raise HTTPException(status_code=400, detail="You cannot report your own listing")
+        raise HTTPException(
+            status_code=400, detail="You cannot report your own listing"
+        )
 
-    # Crear el reporte en la base de datos
     new_report = ItemReport(
         item_id=item.id,
         reporter_id=current_user.id,
@@ -419,16 +469,16 @@ async def report_item(
     )
     session.add(new_report)
 
-    # Marcar el artículo como bloqueado / bajo revisión
     item.is_blacklisted = True
     session.add(item)
     session.commit()
 
     return RedirectResponse(
-        url=f"/items/{item_id}?reported=true", status_code=status.HTTP_302_FOUND
+        url=f"/items/{item_id}?reported=true",
+        status_code=status.HTTP_302_FOUND,
     )
 
-# Item Details (GET)
+
 # Item Details (GET)
 @router.get("/{item_id}", response_class=HTMLResponse)
 async def item_detail(
@@ -461,7 +511,9 @@ async def item_detail(
         ).first()
         is_purchased = existing_purchase is not None
 
-    missing_address_error = request.query_params.get("missing_address") == "true"
+    missing_address_error = (
+        request.query_params.get("missing_address") == "true"
+    )
     reported_success = request.query_params.get("reported") == "true"
 
     return templates.TemplateResponse(
@@ -487,8 +539,10 @@ async def toggle_like(
     session: Session = Depends(get_session),
 ):
     item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    if not item or item.is_blacklisted:
+        raise HTTPException(
+            status_code=400, detail="Item is not available for interaction"
+        )
 
     existing_like = session.exec(
         select(Like).where(
@@ -521,9 +575,7 @@ async def buy_item(
         raise HTTPException(status_code=404, detail="Item not available")
 
     if item.seller_id == current_user.id:
-        raise HTTPException(
-            status_code=400, detail="Cannot buy own product"
-        )
+        raise HTTPException(status_code=400, detail="Cannot buy own product")
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
@@ -533,8 +585,9 @@ async def buy_item(
             status_code=400, detail="This product has already been sold"
         )
 
-    # Validar que el usuario tenga dirección en su perfil
-    user_address = getattr(current_user, "address", None) or getattr(current_user, "shipping_address", None)
+    user_address = getattr(current_user, "address", None) or getattr(
+        current_user, "shipping_address", None
+    )
     if not user_address or not str(user_address).strip():
         return RedirectResponse(
             url=f"/items/{item_id}?missing_address=true",
