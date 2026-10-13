@@ -15,14 +15,24 @@
     {% if items %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {% for item in items %}
-                <div class="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col justify-between">
+                <div class="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col justify-between relative">
                     <div>
                         <div class="h-48 bg-slate-100 overflow-hidden relative">
+                            
+                            <!-- Badge si el artículo guardado está reportado -->
+                            {% if item.is_blacklisted %}
+                                <span class="absolute top-3 left-3 bg-amber-500 text-white text-[10px] font-extrabold px-2.5 py-1 rounded-full shadow-md z-10 flex items-center gap-1">
+                                    ⚠️ Under Review
+                                </span>
+                            {% endif %}
+
                             {% if item.image_filename %}
-                                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="w-full h-full object-cover">
+                                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" 
+                                     class="w-full h-full object-cover {% if item.is_blacklisted %}opacity-60 grayscale-[30%]{% endif %}">
                             {% else %}
                                 <div class="w-full h-full flex items-center justify-center text-slate-400">No photo</div>
                             {% endif %}
+                            
                             <span class="absolute top-3 right-3 bg-slate-900/80 text-white text-xs font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
                                 {{ "%.2f"|format(item.price) }} €
                             </span>

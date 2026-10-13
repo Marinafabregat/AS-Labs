@@ -25,7 +25,8 @@
                         <!-- Image Thumbnail & Status Tag -->
                         <div class="h-44 bg-slate-100 overflow-hidden relative">
                             {% if item.image_filename %}
-                                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="w-full h-full object-cover">
+                                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" 
+                                     class="w-full h-full object-cover {% if item.is_blacklisted %}opacity-60 grayscale-[30%]{% endif %}">
                             {% else %}
                                 <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs font-medium">No Image</div>
                             {% endif %}
@@ -38,8 +39,8 @@
                             <!-- Status Badge Overlay -->
                             <div class="absolute top-2.5 left-2.5">
                                 {% if item.is_blacklisted %}
-                                    <span class="bg-rose-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase">
-                                        Hidden
+                                    <span class="bg-amber-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase flex items-center gap-1">
+                                        ⚠️ Under Review
                                     </span>
                                 {% elif item.id in sold_item_ids %}
                                     <span class="bg-slate-800 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase">
