@@ -1,9 +1,16 @@
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Category, Item, Purchase, Like, ItemReport, ModPetition
 import os
+
 # Define our SQLite
-# For Docker usage:
-sqlite_file_name = "/app/database.db"
+if os.getenv("DATABASE_URL"):
+    sqlite_url = os.getenv("DATABASE_URL")
+else:
+    # Automatically check if we are inside Docker (where /app typically exists)
+    if os.path.exists("/app"):
+        sqlite_file_name = "/app/database.db"
+    else:
+        sqlite_file_name = "database.db"  # Local fallback
 # For local usage:
 # sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
