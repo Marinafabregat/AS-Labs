@@ -1,5 +1,7 @@
 import os
 import uuid
+import mimetypes
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,11 +9,11 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Form, Depends
+from fastapi import FastAPI, HTTPException, Request, Form, Depends, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
-from fastapi.responses import JSONResponse,RedirectResponse, HTMLResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, inspect, text
@@ -20,26 +22,23 @@ from sqlmodel import Session, select
 from contextlib import asynccontextmanager
 
 from models import Base, User
-
 from db import engine, init_db, get_session
 from models import Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
 from routes import users, auth, items
-from datetime import datetime
 
+load_dotenv() # secure site we'll probably have some keys in the environment or similar
 
-load_dotenv() #secure site we'll probably have some keys in the environment or similar
-
-project_root = os.path.dirname(os.path.dirname(__file__))
-db_path = os.path.join(project_root, "database.db")
-uploads_dir = os.path.join(project_root, "uploads") 
-os.makedirs(uploads_dir, exist_ok=True)
+project_root = Path(__file__).resolve().parent
+db_path = project_root / "database.db"
+uploads_dir = project_root / "uploads"
+uploads_dir.mkdir(exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # IF YOU WANT DEFAULT DATA
-    if os.path.isfile(db_path):
+    if db_path.exists():
         print("database.db already exists, delete file if you'd like to start with default values")
         init_db()
     else:
@@ -64,9 +63,8 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+templates = Jinja2Templates(directory="templates")
 
 app.include_router(users.router)
 app.include_router(items.router)
@@ -76,7 +74,7 @@ app.include_router(items.router)
 print("Marketplace application VINSEC started successfully.")
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, session: Session = Depends(get_session),user=Depends(get_current_user_optional)):
+async def index(request: Request, session: Session = Depends(get_session), user=Depends(get_current_user_optional)):
     # Fetch categories and active items for the home page
     categories = session.exec(select(Category)).all()
     items = session.exec(select(Item)).all()
@@ -85,7 +83,6 @@ async def index(request: Request, session: Session = Depends(get_session),user=D
         name="index.html",
         context={"categories": categories, "items": items, "user": user},
     )
-
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -116,6 +113,26 @@ async def general_exception_handler(request: Request, exc: Exception):
         context={"status_code": 500, "detail": str(exc)},
         status_code=500,
     )
+
+
+def copy_seed_image(source_filename: str) -> str:
+    """Busca la imagen base en static/ o uploads/ y la copia en uploads/ asignándole un UUID."""
+    ext = Path(source_filename).suffix.lower()
+    new_filename = f"{uuid.uuid4()}{ext}"
+    destination_path = uploads_dir / new_filename
+
+    possible_sources = [
+        project_root / "static" / source_filename,
+        uploads_dir / source_filename,
+    ]
+
+    for src in possible_sources:
+        if src.exists() and src.is_file():
+            shutil.copy(src, destination_path)
+            return new_filename
+
+    return source_filename
+
 
 def seed_default_data(engine):
     """Populate the database with default marketplace data for testing."""
@@ -172,12 +189,12 @@ def seed_default_data(engine):
         session.refresh(cat_electronics)
         session.refresh(cat_books)
 
-        # 3. Items
+        # 3. Items con nombres de imagen UUID generados dinámicamente
         item1 = Item(
             title="Vintage Mechanical Keyboard",
             description="Fully working retro mechanical keyboard with tactile blue switches.",
             price=75.00,
-            image_filename="keyboard.jpg",
+            image_filename=copy_seed_image("keyboard.jpg"),
             seller_id=seller_user.id,
             category_id=cat_electronics.id
         )
@@ -186,7 +203,7 @@ def seed_default_data(engine):
             title="Introduction to Computer Networks",
             description="Hardcover textbook in great condition.",
             price=25.50,
-            image_filename="textbook.jpg",
+            image_filename=copy_seed_image("textbook.jpg"),
             seller_id=seller_user.id,
             category_id=cat_books.id
         )
@@ -222,4 +239,4 @@ def seed_default_data(engine):
         session.add_all([item_like, item_purchase, mod_report, mod_petition])
         session.commit()
 
-        print("Default marketplace data seeded successfully.")
+        print("Default marketplace data seeded successfully with UUID images.")
