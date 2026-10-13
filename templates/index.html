@@ -153,34 +153,42 @@
       {% if items %}
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
           {% for item in items %}
-            {% if not item.is_blacklisted %}
-              <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
-                <div>
-                  <div class="h-40 bg-slate-100 overflow-hidden relative">
-                    {% if item.image_filename %}
-                      <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="w-full h-full object-cover">
-                    {% else %}
-                      <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Image</div>
-                    {% endif %}
-                    <span class="absolute top-2 right-2 bg-slate-900/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
-                      {{ "%.2f"|format(item.price) }} €
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition relative">
+              <div>
+                <div class="h-40 bg-slate-100 overflow-hidden relative">
+                  
+                  <!-- Badge para productos reportados/bajo revisión -->
+                  {% if item.is_blacklisted %}
+                    <span class="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow-md z-10 flex items-center gap-1">
+                      ⚠️ Under Review
                     </span>
-                  </div>
+                  {% endif %}
 
-                  <div class="p-3.5">
-                    <h4 class="font-bold text-slate-900 truncate text-xs mb-1">{{ item.title }}</h4>
-                    <p class="text-slate-500 text-[11px] line-clamp-2">{{ item.description }}</p>
-                  </div>
+                  {% if item.image_filename %}
+                    <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" 
+                         class="w-full h-full object-cover {% if item.is_blacklisted %}opacity-60 grayscale-[30%]{% endif %}">
+                  {% else %}
+                    <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Image</div>
+                  {% endif %}
+
+                  <span class="absolute top-2 right-2 bg-slate-900/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+                    {{ "%.2f"|format(item.price) }} €
+                  </span>
                 </div>
 
-                <div class="p-3.5 pt-0">
-                  <a href="/items/{{ item.id }}" 
-                     class="block w-full text-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold py-1.5 rounded-lg text-xs transition">
-                    View Details
-                  </a>
+                <div class="p-3.5">
+                  <h4 class="font-bold text-slate-900 truncate text-xs mb-1">{{ item.title }}</h4>
+                  <p class="text-slate-500 text-[11px] line-clamp-2">{{ item.description }}</p>
                 </div>
               </div>
-            {% endif %}
+
+              <div class="p-3.5 pt-0">
+                <a href="/items/{{ item.id }}" 
+                   class="block w-full text-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold py-1.5 rounded-lg text-xs transition">
+                  View Details
+                </a>
+              </div>
+            </div>
           {% endfor %}
         </div>
       {% else %}

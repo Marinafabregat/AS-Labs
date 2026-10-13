@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from auth import get_current_active_user, get_current_user_optional
 from db import get_session
-from models import Category, Item, Like, Purchase, User
+from models import Category, Item, Like, Purchase, User, ItemReport
 
 # All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
@@ -157,10 +157,9 @@ async def liked_items_page(
     liked_item_ids = [like.item_id for like in likes]
     items = []
     if liked_item_ids:
+        # Se eliminó la restricción de is_blacklisted == False
         items = session.exec(
-            select(Item).where(
-                Item.id.in_(liked_item_ids), Item.is_blacklisted == False
-            )
+            select(Item).where(Item.id.in_(liked_item_ids))
         ).all()
 
     return templates.TemplateResponse(
@@ -226,7 +225,6 @@ async def my_items_page(
 
 # --- 2. RUTAS DINÁMICAS (EDICIÓN, BORRADO Y DETALLES) ---
 
-# Vista para editar artículo (GET)
 @router.get("/{item_id}/edit", response_class=HTMLResponse)
 async def edit_item_page(
     request: Request,
@@ -235,7 +233,7 @@ async def edit_item_page(
     session: Session = Depends(get_session),
 ):
     item = session.get(Item, item_id)
-    if not item or item.is_blacklisted:
+    if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
     if item.seller_id != current_user.id:
@@ -269,7 +267,7 @@ async def edit_item(
     session: Session = Depends(get_session),
 ):
     item = session.get(Item, item_id)
-    if not item or item.is_blacklisted:
+    if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
     if item.seller_id != current_user.id:
@@ -397,7 +395,40 @@ async def delete_item(
         url="/items/my-items", status_code=status.HTTP_302_FOUND
     )
 
+# Report Item (POST)
+@router.post("/{item_id}/report")
+async def report_item(
+    item_id: int,
+    reason: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    item = session.get(Item, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
 
+    # Un usuario no debería reportar su propio anuncio
+    if item.seller_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot report your own listing")
+
+    # Crear el reporte en la base de datos
+    new_report = ItemReport(
+        item_id=item.id,
+        reporter_id=current_user.id,
+        reason=reason.strip() or "No reason provided",
+    )
+    session.add(new_report)
+
+    # Marcar el artículo como bloqueado / bajo revisión
+    item.is_blacklisted = True
+    session.add(item)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/items/{item_id}?reported=true", status_code=status.HTTP_302_FOUND
+    )
+
+# Item Details (GET)
 # Item Details (GET)
 @router.get("/{item_id}", response_class=HTMLResponse)
 async def item_detail(
@@ -407,7 +438,7 @@ async def item_detail(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     item = session.get(Item, item_id)
-    if not item or item.is_blacklisted:
+    if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
     is_liked = False
@@ -430,8 +461,8 @@ async def item_detail(
         ).first()
         is_purchased = existing_purchase is not None
 
-    # Detectar la alerta de falta de dirección enviada desde buy_item
     missing_address_error = request.query_params.get("missing_address") == "true"
+    reported_success = request.query_params.get("reported") == "true"
 
     return templates.TemplateResponse(
         request,
@@ -443,6 +474,7 @@ async def item_detail(
             "is_owner": is_owner,
             "is_purchased": is_purchased,
             "missing_address_error": missing_address_error,
+            "reported_success": reported_success,
         },
     )
 
