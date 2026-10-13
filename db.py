@@ -11,7 +11,7 @@ else:
         sqlite_file_name = "/app/database.db"
     else:
         sqlite_file_name = "database.db"  # Local fallback
-        sqlite_url = f"sqlite:///{sqlite_file_name}"
+    sqlite_url = f"sqlite:///{sqlite_file_name}"
         
 connect_args = {"check_same_thread": False}
 
