@@ -79,6 +79,94 @@
             </div>
 
         </div>
+     
+    <!-- TODO ADD LOGIC SO CAT DOESNT ALWAYS SHOW -->
+    <div id="shopping-cat" style="position: fixed; bottom: 5rem; right: 4.5rem; z-index: 99999; pointer-events: none; transition: all 1s ease-in-out;">
+        <div id="cat-sprite" class="cat-idle" style="width: 64px; height: 64px; background-repeat: no-repeat;"></div>
     </div>
+
+    <!-- Animation Keyframes & Classes -->
+    <style>
+    @keyframes idle-anim {
+        from { background-position: 0px 0; }
+        to { background-position: -256px 0; } /* 4 frames * 64px = 256px */
+    }
+
+    @keyframes shop-anim {
+        from { background-position: 0px 0; }
+        to { background-position: -512px 0; } /* 8 frames * 64px = 512px */
+    }
+
+    @keyframes walk-anim {
+        from { background-position: 0px 0; }
+        to { background-position: -256px 0; }
+    }
+
+    .cat-idle {
+        background-image: url('/static/images/cat_idle_sprite.png');
+        background-size: 256px 64px;
+        background-repeat: no-repeat;
+        animation: idle-anim 0.8s steps(4) infinite;
+        transform: scale(3);
+        image-rendering: pixelated;
+    }
+
+    .cat-shop {
+        background-image: url('/static/images/cat_shop_sprite.png');
+        background-size: 512px 64px;
+        background-repeat: no-repeat;
+        animation: shop-anim 0.6s steps(8) infinite;
+        transform: scale(3);
+        image-rendering: pixelated;
+    }
+
+    .cat-walk {
+        background-image: url('/static/images/cat_walk_sprite.png');
+        background-size: 256px 64px;
+        background-repeat: no-repeat;
+        animation: walk-anim 0.5s steps(4) infinite;
+        transform: scale(3); /* Flips cat horizontally to face left when walking */
+        image-rendering: pixelated;
+    }
+    </style>
+
+    <!-- JavaScript Animation Trigger -->
+    <script>
+document.addEventListener("DOMContentLoaded", () => {
+    const buyForm = document.querySelector("form[action*='/buy']");
+    const cat = document.getElementById("shopping-cat");
+    const catSprite = document.getElementById("cat-sprite");
+
+    if (buyForm) {
+        buyForm.addEventListener("submit", function (e) {
+            // 1. Stop the form from reloading the page instantly so we can watch the animation
+            e.preventDefault();
+
+            // 2. Step 1: Smoothly move to center & play walk animation
+            cat.style.right = "50%";
+            cat.style.transform = "translateX(50%)";
+            catSprite.className = "cat-idle";
+
+            // 3. Step 2: Once it reaches the center (after 1.5s), play shop action animation
+            setTimeout(() => {
+                catSprite.className = "cat-shop";
+            }, 1000);
+                
+                
+            // 4. Step 3: After the shop action, walk off-screen to the left (after 3s)
+            setTimeout(() => {
+                cat.style.right = "150%";
+                cat.style.transform = "translateX(70%)";
+                catSprite.className = "cat-walk";
+            }, 1500);
+
+            // 5. Finally, let the actual form submit and process the purchase after the animation finishes (4.5s)
+            setTimeout(() => {
+                HTMLFormElement.prototype.submit.call(buyForm);
+            }, 3000);
+        });
+    }
+});
+</script>
 </main>
 {% endblock %}
