@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}My Purchases - VINSEC Marketplace{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto my-6">
+
+    <!-- Header Section -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div>
+            <h1 class="text-3xl font-black text-slate-900">🛍️ My Purchased Items</h1>
+            <p class="text-slate-500 text-xs sm:text-sm mt-1">Review the history of products you have bought in the marketplace.</p>
+        </div>
+        <a href="/" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition shadow-sm">
+            🔍 Browse Marketplace
+        </a>
+    </div>
+
+    <!-- Purchased Items Grid -->
+    {% if items %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {% for item in items %}
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    <div>
+                        <!-- Image Thumbnail & Badges -->
+                        <div class="h-44 bg-slate-100 overflow-hidden relative">
+                            {% if item.image_filename %}
+                                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="w-full h-full object-cover">
+                            {% else %}
+                                <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs font-medium">No Image</div>
+                            {% endif %}
+                            
+                            <!-- Price Tag -->
+                            <span class="absolute top-2.5 right-2.5 bg-slate-900/80 text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full backdrop-blur-sm">
+                                {{ "%.2f"|format(item.price) }} €
+                            </span>
+
+                            <!-- Status Badge -->
+                            <div class="absolute top-2.5 left-2.5">
+                                <span class="bg-blue-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider shadow-sm">
+                                    ✓ Purchased
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Card Info -->
+                        <div class="p-4">
+                            <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-0.5">Item #{{ item.id }}</span>
+                            <h3 class="font-bold text-slate-900 truncate text-sm mb-1">{{ item.title }}</h3>
+                            <p class="text-slate-500 text-xs line-clamp-2">{{ item.description }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="p-4 pt-0">
+                        <a href="/items/{{ item.id }}" 
+                           class="block w-full text-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold py-2 rounded-xl text-xs transition">
+                            View Details
+                        </a>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <!-- Empty Purchases State -->
+        <div class="bg-white rounded-2xl p-10 text-center border border-slate-200 max-w-sm mx-auto my-8 shadow-sm">
+            <span class="text-4xl block mb-2">🛒</span>
+            <h3 class="text-base font-bold text-slate-800 mb-1">No purchases yet</h3>
+            <p class="text-slate-500 text-xs mb-5">You haven't bought any products in the marketplace.</p>
+            <a href="/" class="inline-block bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2.5 rounded-xl transition text-xs shadow-sm">
+                Explore Catalog
+            </a>
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}

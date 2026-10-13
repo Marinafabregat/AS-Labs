@@ -12,22 +12,22 @@ from auth import get_current_active_user, get_current_user_optional
 from db import get_session
 from models import Category, Item, Like, Purchase, User
 
-# all routes inside this document will start with 'items'
+# All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
-templates = Jinja2Templates(directory="templates") # templates will be here
+templates = Jinja2Templates(directory="templates")
 
-# where pictures will be stored, directory will be created if not existing
+# Directory where pictures will be stored
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# create - publish item page
+
+# Publish item page (GET)
 @router.get("/create", response_class=HTMLResponse)
 async def create_item_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    # categories will appear to select
     categories = session.exec(select(Category)).all()
     return templates.TemplateResponse(
         request,
@@ -35,7 +35,8 @@ async def create_item_page(
         {"user": current_user, "categories": categories},
     )
 
-# create item post
+
+# Process item creation (POST)
 @router.post("/create")
 async def create_item(
     request: Request,
@@ -43,14 +44,12 @@ async def create_item(
     description: str = Form(...),
     price: float = Form(...),
     category_id: int = Form(...),
-    image: UploadFile = File(...),  # Required image file parameter
+    image: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Process new item creation with mandatory image validation."""
     categories = session.exec(select(Category)).all()
 
-    # Validate that an actual image file was provided
     if not image or not image.filename:
         return templates.TemplateResponse(
             request,
@@ -58,12 +57,11 @@ async def create_item(
             {
                 "user": current_user,
                 "categories": categories,
-                "error": "An image is required to publish an item."
+                "error": "An image is required to publish an item.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Save uploaded image file to disk
     file_ext = Path(image.filename).suffix
     image_filename = f"{uuid.uuid4()}{file_ext}"
     file_path = UPLOAD_DIR / image_filename
@@ -89,7 +87,7 @@ async def create_item(
     )
 
 
-# See LIKED items
+# See Liked Items
 @router.get("/liked", response_class=HTMLResponse)
 async def liked_items_page(
     request: Request,
@@ -99,12 +97,14 @@ async def liked_items_page(
     likes = session.exec(
         select(Like).where(Like.user_id == current_user.id)
     ).all()
-    
+
     liked_item_ids = [like.item_id for like in likes]
     items = []
     if liked_item_ids:
         items = session.exec(
-            select(Item).where(Item.id.in_(liked_item_ids), Item.is_blacklisted == False)
+            select(Item).where(
+                Item.id.in_(liked_item_ids), Item.is_blacklisted == False
+            )
         ).all()
 
     return templates.TemplateResponse(
@@ -113,18 +113,43 @@ async def liked_items_page(
         {"user": current_user, "items": items},
     )
 
+
+# See Purchased Items
+@router.get("/purchased", response_class=HTMLResponse)
+async def get_purchased_items(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    # Usamos buyer_id para buscar las compras del usuario actual
+    purchased_item_ids = session.exec(
+        select(Purchase.item_id).where(Purchase.buyer_id == current_user.id)
+    ).all()
+
+    items = []
+    if purchased_item_ids:
+        items = session.exec(
+            select(Item).where(Item.id.in_(purchased_item_ids))
+        ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "purchased.html",
+        {"user": current_user, "items": items},
+    )
+
+
+# See My Published Items
 @router.get("/my-items", response_class=HTMLResponse)
 async def my_items_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Display the list of items published or listed by the current logged-in user."""
     items = session.exec(
         select(Item).where(Item.seller_id == current_user.id)
     ).all()
 
-    # Identify which of the seller's items have already been purchased
     item_ids = [item.id for item in items if item.id is not None]
     sold_item_ids = set()
     if item_ids:
@@ -143,7 +168,8 @@ async def my_items_page(
         },
     )
 
-# Item details
+
+# Item Details
 @router.get("/{item_id}", response_class=HTMLResponse)
 async def item_detail(
     request: Request,
@@ -188,7 +214,7 @@ async def item_detail(
     )
 
 
-# like or dislike item
+# Like or Dislike Item
 @router.post("/{item_id}/like")
 async def toggle_like(
     item_id: int,
@@ -199,7 +225,6 @@ async def toggle_like(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    #looks for row that connects user with item in DB
     existing_like = session.exec(
         select(Like).where(
             Like.user_id == current_user.id, Like.item_id == item_id
@@ -218,14 +243,13 @@ async def toggle_like(
     )
 
 
-#Buy item
+# Buy Item
 @router.post("/{item_id}/buy")
 async def buy_item(
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    #registers the sell of a product
     item = session.get(Item, item_id)
     if not item or item.is_blacklisted:
         raise HTTPException(status_code=404, detail="Item not available")
@@ -252,6 +276,3 @@ async def buy_item(
     return RedirectResponse(
         url=f"/items/{item_id}?bought=true", status_code=status.HTTP_302_FOUND
     )
-
-# --- VIEW MY PUBLISHED ITEMS ---
-
