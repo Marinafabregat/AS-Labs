@@ -1,32 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Login{% endblock %}
+
+{% block title %}Login - VINSEC Marketplace{% endblock %}
 
 {% block content %}
-<h1>Login</h1>
+<!-- Centered Card Container for Login Form -->
+<div class="max-w-md mx-auto my-12">
+    <div class="bg-white p-8 rounded-2xl shadow-md border border-slate-200">
+        
+        <!-- Form Header -->
+        <div class="text-center mb-6">
+            <h1 class="text-2xl font-black text-slate-900">Welcome Back</h1>
+            <p class="text-slate-500 text-sm mt-1">Sign in to your VINSEC marketplace account.</p>
+        </div>
 
-{% if registered %}
-  <p class="success">Registration successful - log in.</p>
-{% endif %}
+        <!-- Success Alert: User just registered successfully -->
+        {% if registered %}
+            <div class="bg-emerald-50 border border-emerald-300 text-emerald-800 px-4 py-3 rounded-xl mb-6 text-sm font-medium text-center">
+                Account created successfully! You can now log in below.
+            </div>
+        {% endif %}
 
-{% if request.query_params.get('deleted') %}
-  <p class="info">Your account has been deleted successfully.</p>
-{% endif %}
+        <!-- Success Alert: Account was deleted -->
+        {% if request.query_params.get('deleted') %}
+            <div class="bg-blue-50 border border-blue-300 text-blue-800 px-4 py-3 rounded-xl mb-6 text-sm font-medium text-center">
+                Your account has been deleted successfully.
+            </div>
+        {% endif %}
 
-{% if error %}
-  <p class="error">{{ error }}</p>
-{% endif %}
+        <!-- Error Alert: Invalid credentials or blacklisted -->
+        {% if error %}
+            <div class="bg-rose-100 border border-rose-400 text-rose-700 px-4 py-3 rounded-xl mb-6 text-sm font-medium text-center">
+                {{ error }}
+            </div>
+        {% endif %}
 
-<form method="post" action="/users/login">
-  <div>
-    <label for="username">Username:</label>
-    <input type="text" id="username" name="username" placeholder="Username" required />
-  </div>
-  <div>
-    <label for="password">Password:</label>
-    <input type="password" id="password" name="password" placeholder="Password" required />
-  </div>
-  <button type="submit">Login</button>
-</form>
+        <!-- Login Form -->
+        <form action="/users/login" method="POST" class="space-y-5">
+            
+            <!-- Username Input -->
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Username</label>
+                <input type="text" name="username" required placeholder="Enter your username"
+                       class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-transparent transition">
+            </div>
 
-<p>Don't have an account? <a href="/users/register">Register here</a>.</p>
+            <!-- Password Input -->
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Password</label>
+                <input type="password" name="password" required placeholder="••••••••"
+                       class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-transparent transition">
+            </div>
+
+            <!-- Submit Button -->
+            <button type="submit" 
+                    class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl shadow-md hover:shadow-lg transition">
+                Log In
+            </button>
+        </form>
+
+        <!-- Redirect to Registration -->
+        <div class="mt-6 text-center border-t border-slate-100 pt-4">
+            <p class="text-sm text-slate-600">
+                Don't have an account? 
+                <a href="/users/register" class="font-bold text-emerald-700 hover:underline">Register here</a>
+            </p>
+        </div>
+
+    </div>
+</div>
 {% endblock %}

@@ -27,6 +27,7 @@ from auth import hash_password, verify_password, get_current_user, require_admin
 #TODO OTHER ROUTES
 #from routes import admin, items, mod, users
 from routes import users
+from routes import items
 from datetime import datetime
 
 
@@ -64,7 +65,7 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(users.router)
-#app.include_router(items.router)
+app.include_router(items.router)
 #app.include_router(mod.router)
 #app.include_router(admin.router)
 
