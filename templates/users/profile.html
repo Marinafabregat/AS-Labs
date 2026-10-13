@@ -16,7 +16,6 @@
         </span>
     </div>
 
-    <!-- NUEVO: Tarjeta de Acceso Rápido a Mis Anuncios y Guardados -->
     <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
         <div>
             <h3 class="font-bold text-slate-800 text-sm">Your Listings & Favorites</h3>
@@ -32,7 +31,18 @@
         </div>
     </div>
 
-    <!-- Alert Messages (Success & Error) -->
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+            <h3 class="font-bold text-slate-800 text-sm">Your purchased items</h3>
+            <p class="text-slate-500 text-xs mt-0.5">Quickly access items you purchased</p>
+        </div>
+        <div class="flex space-x-2">
+            <a href="/items/purchased" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold py-2 px-3.5 rounded-xl text-xs transition">
+                🛍️  My purchases
+            </a>
+        </div>
+    </div>
+
     {% if message %}
         <div class="bg-emerald-50 border border-emerald-300 text-emerald-800 px-4 py-3 rounded-xl text-xs font-medium">
             {{ message }}
@@ -45,11 +55,9 @@
         </div>
     {% endif %}
 
-    <!-- Update Profile Form Card -->
     <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <h2 class="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Update Profile Information</h2>
 
-        <!-- Note: action points to /users/update matching your router -->
         <form action="/users/update" method="POST" class="space-y-4">
             
             <!-- Email Input -->

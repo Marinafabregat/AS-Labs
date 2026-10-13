@@ -17,3 +17,4 @@ python-multipart
 authlib>=1.2.0
 casbin>=1.5.0
 itsdangerous
+Pillow
