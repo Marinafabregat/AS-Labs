@@ -30,4 +30,3 @@ htmlcov/
 *.tox/
 *.mypy_cache/
 
-certs/
