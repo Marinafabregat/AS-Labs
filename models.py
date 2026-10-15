@@ -154,6 +154,15 @@ class ItemReport(SQLModel, table=True):
     reporter: Optional[User] = Relationship(back_populates="reports_made")
 
 
+class UserReport(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    target_user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
+    reporter_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
+    reason: str
+    status: ReportStatus = Field(default=ReportStatus.PENDING)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ModPetition(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")

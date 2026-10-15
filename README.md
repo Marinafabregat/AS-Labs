@@ -94,7 +94,7 @@ uvicorn main:app --reload
    docker compose up --build -d
    ```
 
-2. **Access the app at:** http://localhost:8000
+2. **Access the app at:** https://localhost:8000
 
 3. **View logs:**
    ```bash

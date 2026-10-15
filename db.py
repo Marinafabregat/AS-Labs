@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, create_engine, Session, select
-from models import User, Category, Item, Purchase, Like, ItemReport, ModPetition
+from models import User, Category, Item, Purchase, Like, ItemReport, UserReport, ModPetition
 import os
 
 # Define our SQLite

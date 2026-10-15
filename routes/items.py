@@ -522,6 +522,7 @@ async def item_detail(
         {
             "user": current_user,
             "item": item,
+            "seller": session.get(User, item.seller_id),
             "is_liked": is_liked,
             "is_owner": is_owner,
             "is_purchased": is_purchased,

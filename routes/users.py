@@ -9,11 +9,12 @@ from sqlmodel import Session, select
 from auth import (
     get_current_active_user,
     get_current_user,
+    get_current_user_optional,
     hash_password,
     verify_password,
 )
 from db import get_session
-from models import ModPetition, User, UserRole
+from models import Item, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -289,3 +290,72 @@ async def delete_account(
     response = RedirectResponse(url="/users/login?deleted=true", status_code=status.HTTP_302_FOUND)
     response.delete_cookie("access_token")
     return response
+
+
+# PUBLIC PROFILE & USER REPORTS
+
+@router.get("/{user_id}", response_class=HTMLResponse)
+async def public_profile(
+    request: Request,
+    user_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    session: Session = Depends(get_session),
+):
+    """Show public account details and active listings without exposing private data."""
+    profile_user = session.get(User, user_id)
+    if not profile_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    items = session.exec(
+        select(Item).where(
+            Item.seller_id == profile_user.id,
+            Item.is_blacklisted.is_(False),
+        )
+    ).all()
+    is_reported = session.exec(
+        select(UserReport.id).where(
+            UserReport.target_user_id == profile_user.id,
+            UserReport.status == ReportStatus.PENDING,
+        )
+    ).first() is not None
+
+    return templates.TemplateResponse(
+        request,
+        "users/public_profile.html",
+        {
+            "user": current_user,
+            "profile_user": profile_user,
+            "items": items,
+            "is_reported": is_reported,
+            "reported_success": request.query_params.get("reported") == "true",
+        },
+    )
+
+
+@router.post("/{user_id}/report")
+async def report_user(
+    user_id: UUID,
+    reason: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Save a report about another user for moderator review."""
+    target_user = session.get(User, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target_user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot report yourself")
+
+    user_report = UserReport(
+        target_user_id=target_user.id,
+        reporter_id=current_user.id,
+        reason=reason.strip() or "No reason provided",
+    )
+    session.add(user_report)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/users/{target_user.id}?reported=true",
+        status_code=status.HTTP_302_FOUND,
+    )
