@@ -28,7 +28,7 @@ def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
 # --- 2. ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM) ---
 DEFAULT_IMAGE_KEY_HEX = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 ENV_IMAGE_KEY = os.getenv("IMAGE_ENCRYPTION_KEY")
-IMAGE_KEY = bytes.fromhex(ENV_IMAGE_KEY) if ENV_IMAGE_KEY else bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
+IMAGE_KEY = base64.b64decode(ENV_IMAGE_KEY) if ENV_IMAGE_KEY else bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
 
 aesgcm = AESGCM(IMAGE_KEY)
 
