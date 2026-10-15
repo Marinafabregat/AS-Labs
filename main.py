@@ -24,6 +24,7 @@ from db import engine, init_db, get_session
 from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
 from routes import users, auth, items
+from image_storage import migrate_plaintext_uploads
 
 load_dotenv()
 
@@ -41,13 +42,6 @@ def seed_default_data(engine):
         if existing_users:
             print("Default data already seeded.")
             return
-
-        # Copia las imágenes de semilla desde static/ a uploads/ sin cambiar el nombre
-        for seed_img in ["keyboard.jpg", "textbook.jpg"]:
-            src = project_root / "static" / seed_img
-            dst = uploads_dir / seed_img
-            if src.exists() and not dst.exists():
-                shutil.copy(src, dst)
 
         # 1. Usuarios iniciales
         admin_user = User(
@@ -139,6 +133,10 @@ def seed_default_data(engine):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Encrypt any plaintext image left in uploads/ (legacy uploads, seed images)
+    n = migrate_plaintext_uploads()
+    if n:
+        print(f"Encrypted {n} plaintext image(s) at rest.")
     if db_path.exists():
         print("database.db already exists, delete file if you'd like to start with default values")
         init_db()
@@ -165,7 +163,8 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# NOTE: /uploads is intentionally NOT mounted. Images are encrypted at rest and only
+# served, decrypted, through the authorized route GET /items/{id}/image.
 templates = Jinja2Templates(directory="templates")
 
 app.include_router(users.router)
