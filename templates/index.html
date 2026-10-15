@@ -165,7 +165,7 @@
                   {% endif %}
 
                   {% if item.image_filename %}
-                    <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" 
+                    <img src="/items/{{ item.id }}/image" alt="{{ item.title }}" 
                          class="w-full h-full object-cover {% if item.is_blacklisted %}opacity-60 grayscale-[30%]{% endif %}">
                   {% else %}
                     <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Image</div>
