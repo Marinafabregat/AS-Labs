@@ -3,7 +3,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
@@ -17,9 +16,10 @@ from auth import (
 from db import get_session
 from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
+from template_context import templates
+from user_reports import is_user_reported
 
 router = APIRouter(prefix="/users", tags=["Users"])
-templates = Jinja2Templates(directory="templates")
 
 
 # REGISTER
@@ -503,12 +503,7 @@ async def public_profile(
             Item.is_blacklisted.is_(False),
         )
     ).all()
-    is_reported = session.exec(
-        select(UserReport.id).where(
-            UserReport.target_user_id == profile_user.id,
-            UserReport.status == ReportStatus.PENDING,
-        )
-    ).first() is not None
+    is_reported = is_user_reported(session, profile_user.id)
 
     return templates.TemplateResponse(
         request,

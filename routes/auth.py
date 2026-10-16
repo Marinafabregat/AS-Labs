@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 from auth import get_current_user, get_session
 from models import User
 from oauth import oauth
+from template_context import templates
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-templates = Jinja2Templates(directory="templates")
 
 
 @router.get("/login", response_class=HTMLResponse)

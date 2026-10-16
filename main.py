@@ -15,7 +15,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session, select 
@@ -24,6 +23,7 @@ from db import engine, init_db, get_session
 from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
 from routes import users, auth, items
+from template_context import templates
 
 load_dotenv()
 
@@ -166,8 +166,6 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-templates = Jinja2Templates(directory="templates")
-
 app.include_router(users.router)
 app.include_router(items.router)
 

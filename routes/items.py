@@ -7,16 +7,16 @@ from typing import Optional
 from PIL import Image
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from auth import get_current_active_user, get_current_user_optional
 from db import get_session
 from models import Category, Item, ItemReport, Like, Purchase, User
+from template_context import templates
+from user_reports import is_user_reported
 
 # All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
-templates = Jinja2Templates(directory="templates")
 
 # Directory where pictures will be stored
 UPLOAD_DIR = Path("uploads")
@@ -66,6 +66,12 @@ async def create_item_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    if is_user_reported(session, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has a pending report and cannot publish items.",
+        )
+
     categories = session.exec(select(Category)).all()
     return templates.TemplateResponse(
         request,
@@ -86,6 +92,12 @@ async def create_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    if is_user_reported(session, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has a pending report and cannot publish items.",
+        )
+
     categories = session.exec(select(Category)).all()
 
     if not image or not image.filename:

@@ -27,16 +27,9 @@
             <!-- Navigation Links -->
             <nav class="flex items-center space-x-3 text-sm font-medium">
                 {% if user %}
-                    {% if not user.is_blacklisted %}
-                        {# TODO: Disable this button if the user has a pending report #}
-                        <a href="/items/create" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl transition font-semibold shadow-sm flex items-center space-x-1">
-                            <span>+ Sell Item</span>
-                        </a>
-                    {% else %}
-                        <div class="bg-emerald-600/80 text-white px-3.5 py-2 rounded-xl transition font-semibold shadow-sm flex items-center space-x-1 cursor-not-allowed">
-                            <span>User reported. Selling disabled. Under for admin review</span>
-                        </div>
-                    {% endif %}
+                    <a href="/items/create" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl transition font-semibold shadow-sm flex items-center space-x-1">
+                        <span>+ Sell Item</span>
+                    </a>
                     <a href="/items/my-items" class="hover:text-emerald-200 transition px-2 py-1">📦 My Items</a>
                     <a href="/items/liked" class="hover:text-emerald-200 transition px-2 py-1">❤️ Saved</a>
                     <a href="/items/purchased" class="hover:text-emerald-200 transition px-2 py-1"> 🛒 Purchased</a>
