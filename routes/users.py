@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
 from auth import (
@@ -14,7 +15,7 @@ from auth import (
     verify_password,
 )
 from db import get_session
-from models import Item, ModPetition, ReportStatus, User, UserReport, UserRole
+from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -290,6 +291,196 @@ async def delete_account(
     response = RedirectResponse(url="/users/login?deleted=true", status_code=status.HTTP_302_FOUND)
     response.delete_cookie("access_token")
     return response
+
+
+# MODERATOR REPORTS
+
+def _require_moderator(current_user: User) -> None:
+    if current_user.role != UserRole.MODERATOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Moderator privileges required.",
+        )
+
+
+def _require_admin(current_user: User) -> None:
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator privileges required.",
+        )
+
+
+@router.get("/moderation-reports", response_class=HTMLResponse)
+async def moderation_reports_page(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Show pending user and item reports to moderators."""
+    _require_moderator(current_user)
+
+    target_user = aliased(User)
+    user_reporter = aliased(User)
+    user_reports = session.exec(
+        select(UserReport, target_user, user_reporter)
+        .join(target_user, UserReport.target_user_id == target_user.id)
+        .join(user_reporter, UserReport.reporter_id == user_reporter.id)
+        .where(UserReport.status == ReportStatus.PENDING)
+        .order_by(UserReport.created_at.desc())
+    ).all()
+
+    item_seller = aliased(User)
+    item_reporter = aliased(User)
+    item_reports = session.exec(
+        select(ItemReport, Item, item_seller, item_reporter)
+        .join(Item, ItemReport.item_id == Item.id)
+        .join(item_seller, Item.seller_id == item_seller.id)
+        .join(item_reporter, ItemReport.reporter_id == item_reporter.id)
+        .where(ItemReport.status == ReportStatus.PENDING)
+        .order_by(ItemReport.created_at.desc())
+    ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "users/moderation_reports.html",
+        {
+            "user": current_user,
+            "user_reports": user_reports,
+            "item_reports": item_reports,
+        },
+    )
+
+
+@router.get("/admin-reports", response_class=HTMLResponse)
+async def admin_reports_page(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Show reports escalated by moderators for administrator review."""
+    _require_admin(current_user)
+
+    item_seller = aliased(User)
+    item_reporter = aliased(User)
+    item_reports = session.exec(
+        select(ItemReport, Item, item_seller, item_reporter)
+        .join(Item, ItemReport.item_id == Item.id)
+        .join(item_seller, Item.seller_id == item_seller.id)
+        .join(item_reporter, ItemReport.reporter_id == item_reporter.id)
+        .where(ItemReport.status == ReportStatus.FOR_ADMIN)
+        .order_by(ItemReport.created_at.desc())
+    ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "users/admin_reports.html",
+        {"user": current_user, "item_reports": item_reports},
+    )
+
+
+@router.post("/moderation-reports/users/{report_id}/delete")
+async def delete_reported_user(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    _require_moderator(current_user)
+    report = session.get(UserReport, report_id)
+    if not report or report.status != ReportStatus.PENDING:
+        raise HTTPException(status_code=404, detail="Pending user report not found")
+
+    target_user = session.get(User, report.target_user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Reported user not found")
+
+    related_reports = session.exec(
+        select(UserReport).where(
+            (UserReport.target_user_id == target_user.id)
+            | (UserReport.reporter_id == target_user.id)
+        )
+    ).all()
+    for related_report in related_reports:
+        session.delete(related_report)
+
+    session.delete(target_user)
+    session.commit()
+    return RedirectResponse(
+        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/moderation-reports/users/{report_id}/dismiss")
+async def dismiss_user_report(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    _require_moderator(current_user)
+    report = session.get(UserReport, report_id)
+    if not report or report.status != ReportStatus.PENDING:
+        raise HTTPException(status_code=404, detail="Pending user report not found")
+
+    report.status = ReportStatus.DISMISSED
+    session.add(report)
+    session.commit()
+    return RedirectResponse(
+        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/moderation-reports/items/{report_id}/escalate")
+async def escalate_item_report(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    _require_moderator(current_user)
+    report = session.get(ItemReport, report_id)
+    if not report or report.status != ReportStatus.PENDING:
+        raise HTTPException(status_code=404, detail="Pending item report not found")
+
+    report.status = ReportStatus.FOR_ADMIN
+    session.add(report)
+    session.commit()
+
+    return RedirectResponse(
+        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/moderation-reports/items/{report_id}/dismiss")
+async def dismiss_item_report(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    _require_moderator(current_user)
+    report = session.get(ItemReport, report_id)
+    if not report or report.status != ReportStatus.PENDING:
+        raise HTTPException(status_code=404, detail="Pending item report not found")
+
+    item = session.get(Item, report.item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Reported item not found")
+
+    report.status = ReportStatus.DISMISSED
+    still_reported = session.exec(
+        select(ItemReport.id).where(
+            ItemReport.item_id == item.id,
+            ItemReport.status == ReportStatus.PENDING,
+            ItemReport.id != report.id,
+        )
+    ).first()
+    if not still_reported:
+        item.is_blacklisted = False
+
+    session.add(report)
+    session.add(item)
+    session.commit()
+    return RedirectResponse(
+        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
+    )
 
 
 # PUBLIC PROFILE & USER REPORTS
