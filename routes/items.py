@@ -583,6 +583,11 @@ async def buy_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    if is_user_reported(session, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has a pending report and cannot buy items.",
+    )
     item = session.get(Item, item_id)
     if not item or item.is_blacklisted:
         raise HTTPException(status_code=404, detail="Item not available")

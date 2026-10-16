@@ -26,6 +26,7 @@ class UserRole(str, Enum):
 
 class ReportStatus(str, Enum):
     PENDING = "pending"
+    FOR_ADMIN = "for_admin"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
 

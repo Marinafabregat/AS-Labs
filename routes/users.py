@@ -302,7 +302,7 @@ def _require_moderator(current_user: User) -> None:
             detail="Moderator privileges required.",
         )
 
-
+# TODO: Implement admin report review page and actions for escalated reports.
 def _require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
@@ -326,7 +326,11 @@ async def moderation_reports_page(
         select(UserReport, target_user, user_reporter)
         .join(target_user, UserReport.target_user_id == target_user.id)
         .join(user_reporter, UserReport.reporter_id == user_reporter.id)
-        .where(UserReport.status == ReportStatus.PENDING)
+        .where(
+            UserReport.status.in_(
+                [ReportStatus.PENDING, ReportStatus.FOR_ADMIN]
+            )
+        )
         .order_by(UserReport.created_at.desc())
     ).all()
 
@@ -337,7 +341,11 @@ async def moderation_reports_page(
         .join(Item, ItemReport.item_id == Item.id)
         .join(item_seller, Item.seller_id == item_seller.id)
         .join(item_reporter, ItemReport.reporter_id == item_reporter.id)
-        .where(ItemReport.status == ReportStatus.PENDING)
+        .where(
+            ItemReport.status.in_(
+                [ReportStatus.PENDING, ReportStatus.FOR_ADMIN]
+            )
+        )
         .order_by(ItemReport.created_at.desc())
     ).all()
 
@@ -351,7 +359,7 @@ async def moderation_reports_page(
         },
     )
 
-
+# TODO: Add admin reports page to view escalated reports for administrator review.
 @router.get("/admin-reports", response_class=HTMLResponse)
 async def admin_reports_page(
     request: Request,
@@ -379,37 +387,6 @@ async def admin_reports_page(
     )
 
 
-@router.post("/moderation-reports/users/{report_id}/delete")
-async def delete_reported_user(
-    report_id: int,
-    current_user: User = Depends(get_current_active_user),
-    session: Session = Depends(get_session),
-):
-    _require_moderator(current_user)
-    report = session.get(UserReport, report_id)
-    if not report or report.status != ReportStatus.PENDING:
-        raise HTTPException(status_code=404, detail="Pending user report not found")
-
-    target_user = session.get(User, report.target_user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Reported user not found")
-
-    related_reports = session.exec(
-        select(UserReport).where(
-            (UserReport.target_user_id == target_user.id)
-            | (UserReport.reporter_id == target_user.id)
-        )
-    ).all()
-    for related_report in related_reports:
-        session.delete(related_report)
-
-    session.delete(target_user)
-    session.commit()
-    return RedirectResponse(
-        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
-    )
-
-
 @router.post("/moderation-reports/users/{report_id}/dismiss")
 async def dismiss_user_report(
     report_id: int,
@@ -429,8 +406,27 @@ async def dismiss_user_report(
     )
 
 
-@router.post("/moderation-reports/items/{report_id}/escalate")
-async def escalate_item_report(
+@router.post("/moderation-reports/users/{report_id}/accept")
+async def accept_user_report(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    _require_moderator(current_user)
+    report = session.get(UserReport, report_id)
+    if not report or report.status != ReportStatus.PENDING:
+        raise HTTPException(status_code=404, detail="Pending user report not found")
+
+    report.status = ReportStatus.FOR_ADMIN
+    session.add(report)
+    session.commit()
+    return RedirectResponse(
+        url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/moderation-reports/items/{report_id}/accept")
+async def accept_item_report(
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
@@ -443,7 +439,6 @@ async def escalate_item_report(
     report.status = ReportStatus.FOR_ADMIN
     session.add(report)
     session.commit()
-
     return RedirectResponse(
         url="/users/moderation-reports", status_code=status.HTTP_302_FOUND
     )
@@ -468,7 +463,9 @@ async def dismiss_item_report(
     still_reported = session.exec(
         select(ItemReport.id).where(
             ItemReport.item_id == item.id,
-            ItemReport.status == ReportStatus.PENDING,
+            ItemReport.status.in_(
+                [ReportStatus.PENDING, ReportStatus.FOR_ADMIN]
+            ),
             ItemReport.id != report.id,
         )
     ).first()
