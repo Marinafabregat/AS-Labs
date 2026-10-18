@@ -22,7 +22,7 @@ from sqlmodel import Session, select
 from db import engine, init_db, get_session
 from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
-from routes import users, auth, items
+from routes import users, auth, items, mod, admin
 from template_context import templates
 
 load_dotenv()
@@ -168,6 +168,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(users.router)
 app.include_router(items.router)
+app.include_router(mod.router)
+app.include_router(admin.router)
+
 
 print("Marketplace application VINSEC started successfully.")
 

@@ -34,6 +34,14 @@
                     <a href="/items/liked" class="hover:text-emerald-200 transition px-2 py-1">❤️ Saved</a>
                     <a href="/items/purchased" class="hover:text-emerald-200 transition px-2 py-1"> 🛒 Purchased</a>
                     <a href="/users/profile" class="hover:text-emerald-200 transition px-2 py-1">Profile ({{ user.username }})</a>
+                    {% if user.role == 'moderator' or user.role.value == 'MODERATOR'%}
+                    
+                        <a href="/mod/moderator-reports" class="hover:text-emerald-200 transition px-2 py-1">Mod Report Panel</a>
+                    {% endif %}
+                    {% if user.role == 'admin' or user.role.value == 'ADMIN'%}
+                    
+                        <a href="/admin/admin-reports" class="hover:text-emerald-200 transition px-2 py-1">Admin Report Panel</a>
+                    {% endif %}
                     <a href="/users/logout" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg transition text-xs font-semibold shadow-sm">Logout</a>
                 {% else %}
                     <a href="/users/login" class="bg-white text-emerald-800 px-4 py-2 rounded-xl font-semibold hover:bg-emerald-50 transition shadow-sm">Log In</a>

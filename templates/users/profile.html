@@ -5,13 +5,24 @@
 {% block content %}
 <div class="max-w-xl mx-auto my-8 space-y-6">
 
-    {% if user.role == 'moderator' %}
+    {% if user.role == 'moderator' or user.role.value == 'MODERATOR'%}
     <div class="bg-amber-50 p-5 rounded-2xl shadow-sm border border-amber-200 flex items-center justify-between gap-4">
         <div>
-            <h2 class="font-bold text-amber-900 text-sm">Moderation reports</h2>
+            <h2 class="font-bold text-amber-900 text-sm">moderator reports</h2>
             <p class="text-amber-800 text-xs mt-0.5">Review reports submitted about users and listings.</p>
         </div>
-        <a href="/users/moderation-reports" class="bg-amber-700 hover:bg-amber-800 text-white font-bold py-2 px-3.5 rounded-xl text-xs transition whitespace-nowrap">
+        <a href="/mod/moderator-reports" class="bg-amber-700 hover:bg-amber-800 text-white font-bold py-2 px-3.5 rounded-xl text-xs transition whitespace-nowrap">
+            Open report panel
+        </a>
+    </div>
+    {% endif %}
+    {% if user.role == 'admin' or user.role.value == 'ADMIN'%}
+    <div class="bg-amber-50 p-5 rounded-2xl shadow-sm border border-amber-200 flex items-center justify-between gap-4">
+        <div>
+            <h2 class="font-bold text-amber-900 text-sm">admin reports</h2>
+            <p class="text-amber-800 text-xs mt-0.5">Review reports submitted about users and listings.</p>
+        </div>
+        <a href="/admin/admin-reports" class="bg-amber-700 hover:bg-amber-800 text-white font-bold py-2 px-3.5 rounded-xl text-xs transition whitespace-nowrap">
             Open report panel
         </a>
     </div>
