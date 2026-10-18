@@ -25,6 +25,23 @@ def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
         return ciphertext
 
 
+# --- 1b. OAUTH / SECRET TOKEN ENCRYPTION (same Fernet key as PII) ---
+def encrypt_secret(text: Optional[str]) -> Optional[str]:
+    """Cifra un secreto (p.ej. un token OAuth) para almacenarlo en reposo."""
+    if not text:
+        return None
+    return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(ciphertext: Optional[str]) -> Optional[str]:
+    if not ciphertext:
+        return None
+    try:
+        return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except Exception:
+        return ciphertext
+
+
 # --- 2. ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM) ---
 DEFAULT_IMAGE_KEY_HEX = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 ENV_IMAGE_KEY = os.getenv("IMAGE_ENCRYPTION_KEY")

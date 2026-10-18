@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 from auth import get_current_user, get_session
 from models import User
 from oauth import oauth
+from security_encryption import encrypt_secret
 from template_context import templates
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -67,9 +68,9 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     if user:
         if user.is_blacklisted:
             return _blacklist_denied(request)
-        # Update tokens
-        user.oauth_access_token = token.get("access_token")
-        user.oauth_refresh_token = token.get("refresh_token")
+        # Update tokens (encrypted at rest)
+        user.oauth_access_token = encrypt_secret(token.get("access_token"))
+        user.oauth_refresh_token = encrypt_secret(token.get("refresh_token"))
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -86,8 +87,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
         request.session["pending_oauth_link"] = {
             "email": email,
             "oauth_id": oauth_id,
-            "access_token": token.get("access_token"),
-            "refresh_token": token.get("refresh_token"),
+            "access_token": encrypt_secret(token.get("access_token")),
+            "refresh_token": encrypt_secret(token.get("refresh_token")),
             "name": userinfo.get("name", ""),
             "picture": userinfo.get("picture", ""),
         }
@@ -107,8 +108,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
         hashed_password=None,
         oauth_provider="google",
         oauth_id=oauth_id,
-        oauth_access_token=token.get("access_token"),
-        oauth_refresh_token=token.get("refresh_token"),
+        oauth_access_token=encrypt_secret(token.get("access_token")),
+        oauth_refresh_token=encrypt_secret(token.get("refresh_token")),
     )
     session.add(user)
     session.commit()
@@ -151,6 +152,7 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
     if user:
         user.oauth_provider = "google"
         user.oauth_id = oauth_data["oauth_id"]
+        # Tokens are already encrypted when stored in the pending link session
         user.oauth_access_token = oauth_data["access_token"]
         user.oauth_refresh_token = oauth_data["refresh_token"]
         if not user.username:
