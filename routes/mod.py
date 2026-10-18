@@ -17,7 +17,6 @@ from db import get_session
 from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 from template_context import templates
-from user_reports import is_user_reported
 
 router = APIRouter(prefix="/mod", tags=["mod"])
 
@@ -117,8 +116,14 @@ async def accept_user_report(
     if not report or report.status != ReportStatus.PENDING:
         raise HTTPException(status_code=404, detail="Pending user report not found")
 
+    target_user = session.get(User, report.target_user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Reported user not found")
+
     report.status = ReportStatus.FOR_ADMIN
+    target_user.is_blacklisted = True
     session.add(report)
+    session.add(target_user)
     session.commit()
     return RedirectResponse(
         url="/mod/moderator-reports", status_code=status.HTTP_302_FOUND
@@ -136,8 +141,14 @@ async def accept_item_report(
     if not report or report.status != ReportStatus.PENDING:
         raise HTTPException(status_code=404, detail="Pending item report not found")
 
+    item = session.get(Item, report.item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Reported item not found")
+
     report.status = ReportStatus.FOR_ADMIN
+    item.is_blacklisted = True
     session.add(report)
+    session.add(item)
     session.commit()
     return RedirectResponse(
         url="/mod/moderator-reports", status_code=status.HTTP_302_FOUND
@@ -178,4 +189,3 @@ async def dismiss_item_report(
     return RedirectResponse(
         url="/mod/moderator-reports", status_code=status.HTTP_302_FOUND
     )
-
