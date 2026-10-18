@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
@@ -9,6 +11,15 @@ from template_context import templates
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
+def _blacklist_denied(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "auth/login.html",
+        {"error": "Account is blacklisted. Access denied."},
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Show login page with both Google OAuth and password options."""
@@ -18,7 +29,7 @@ async def login_page(request: Request):
 @router.get("/google")
 async def google_login(request: Request):
     """Redirect to Google OAuth."""
-    redirect_uri = request.url_for("google_callback")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or str(request.url_for("google_callback"))
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -54,6 +65,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     user = session.exec(select(User).where(User.oauth_id == oauth_id)).first()
 
     if user:
+        if user.is_blacklisted:
+            return _blacklist_denied(request)
         # Update tokens
         user.oauth_access_token = token.get("access_token")
         user.oauth_refresh_token = token.get("refresh_token")
@@ -67,6 +80,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     existing_user = session.exec(select(User).where(User.email == email)).first()
 
     if existing_user:
+        if existing_user.is_blacklisted:
+            return _blacklist_denied(request)
         # Store OAuth info in session for linking confirmation
         request.session["pending_oauth_link"] = {
             "email": email,
@@ -112,6 +127,13 @@ async def link_account_page(request: Request):
     return templates.TemplateResponse(request, "auth/link.html", {"oauth_data": oauth_data})
 
 
+@router.get("/cancel")
+async def cancel_link(request: Request):
+    """Discard a pending Google account link and return to login."""
+    request.session.pop("pending_oauth_link", None)
+    return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
+
+
 @router.post("/link")
 async def link_account_confirm(request: Request, session: Session = Depends(get_session)):
     """Confirm linking Google account to existing user."""
@@ -121,6 +143,10 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
 
     email = oauth_data["email"]
     user = session.exec(select(User).where(User.email == email)).first()
+
+    if user and user.is_blacklisted:
+        request.session.pop("pending_oauth_link", None)
+        return _blacklist_denied(request)
 
     if user:
         user.oauth_provider = "google"

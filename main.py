@@ -167,6 +167,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(users.router)
+app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(mod.router)
 app.include_router(admin.router)
