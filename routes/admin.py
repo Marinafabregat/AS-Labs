@@ -21,7 +21,7 @@ from user_reports import is_user_reported
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-# MODERATOR REPORTS
+# ADMIN REPORTS
 
 
 def _require_admin(current_user: User) -> None:

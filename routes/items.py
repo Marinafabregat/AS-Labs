@@ -481,7 +481,7 @@ async def report_item(
     )
     session.add(new_report)
 
-    item.is_blacklisted = True
+    item.is_blacklisted = True #esto solo tendria que pasar despues de que lo haga un mod no? 
     session.add(item)
     session.commit()
 
