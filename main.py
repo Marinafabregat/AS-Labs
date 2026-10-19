@@ -157,16 +157,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# HTTPS termination: nginx in Docker, plain HTTP for local uvicorn dev
+env_https_only = os.getenv("SESSION_HTTPS_ONLY")
+if env_https_only is None:
+    env_https_only = "true" if os.path.exists("/app") else "false"
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-in-production"),
-    https_only=False,
+    https_only=env_https_only.lower() == "true",
     same_site="lax",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(users.router)
+app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(mod.router)
 app.include_router(admin.router)

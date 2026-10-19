@@ -11,11 +11,9 @@
             <h1 class="text-3xl font-black text-slate-900">📦 My Published Items</h1>
             <p class="text-slate-500 text-xs sm:text-sm mt-1">Manage all products you have listed for sale in the marketplace.</p>
         </div>
-        {% if not current_user_is_reported %}
-            <a href="/items/create" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition shadow-sm">
-                + Post New Item
-            </a>
-        {% endif %}
+        <a href="/items/create" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition shadow-sm">
+            + Post New Item
+        </a>
     </div>
 
     <!-- Items Grid Feed -->

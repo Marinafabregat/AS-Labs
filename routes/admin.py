@@ -17,7 +17,6 @@ from db import get_session
 from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 from template_context import templates
-from user_reports import is_user_reported
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 

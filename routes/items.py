@@ -11,9 +11,17 @@ from sqlmodel import Session, select
 
 from auth import get_current_active_user, get_current_user_optional
 from db import get_session
-from models import Category, Item, ItemReport, Like, Purchase, User
+from models import (
+    Category,
+    Item,
+    ItemReport,
+    Like,
+    Purchase,
+    ReportStatus,
+    User,
+    UserRole,
+)
 from template_context import templates
-from user_reports import is_user_reported
 
 # All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
@@ -66,12 +74,6 @@ async def create_item_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    if is_user_reported(session, current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has a pending report and cannot publish items.",
-        )
-
     categories = session.exec(select(Category)).all()
     return templates.TemplateResponse(
         request,
@@ -92,12 +94,6 @@ async def create_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    if is_user_reported(session, current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has a pending report and cannot publish items.",
-        )
-
     categories = session.exec(select(Category)).all()
 
     if not image or not image.filename:
@@ -478,11 +474,17 @@ async def report_item(
         item_id=item.id,
         reporter_id=current_user.id,
         reason=reason.strip() or "No reason provided",
+        status=(
+            ReportStatus.FOR_ADMIN
+            if current_user.role == UserRole.MODERATOR
+            else ReportStatus.PENDING
+        ),
     )
     session.add(new_report)
 
-    item.is_blacklisted = True #esto solo tendria que pasar despues de que lo haga un mod no? 
-    session.add(item)
+    if new_report.status == ReportStatus.FOR_ADMIN:
+        item.is_blacklisted = True
+        session.add(item)
     session.commit()
 
     return RedirectResponse(
@@ -583,11 +585,6 @@ async def buy_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    if is_user_reported(session, current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account has a pending report and cannot buy items.",
-    )
     item = session.get(Item, item_id)
     if not item or item.is_blacklisted:
         raise HTTPException(status_code=404, detail="Item not available")

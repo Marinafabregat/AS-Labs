@@ -17,7 +17,6 @@ from db import get_session
 from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 from template_context import templates
-from user_reports import is_user_reported
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -312,7 +311,6 @@ async def public_profile(
             Item.is_blacklisted.is_(False),
         )
     ).all()
-    is_reported = is_user_reported(session, profile_user.id)
 
     return templates.TemplateResponse(
         request,
@@ -321,7 +319,6 @@ async def public_profile(
             "user": current_user,
             "profile_user": profile_user,
             "items": items,
-            "is_reported": is_reported,
             "reported_success": request.query_params.get("reported") == "true",
         },
     )

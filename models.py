@@ -56,8 +56,8 @@ class User(SQLModel, table=True):
     # OAuth fields
     oauth_provider: Optional[str] = Field(default=None)
     oauth_id: Optional[str] = Field(default=None, index=True)
-    oauth_access_token: Optional[str] = Field(default=None)
-    oauth_refresh_token: Optional[str] = Field(default=None)
+    oauth_access_token: Optional[str] = Field(default=None)  # encrypted at rest
+    oauth_refresh_token: Optional[str] = Field(default=None)  # encrypted at rest
 
     # Relationships
     posted_items: List["Item"] = Relationship(
