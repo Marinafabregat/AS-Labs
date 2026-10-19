@@ -36,8 +36,15 @@ async def admin_reports_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Show escalated user and item reports for administrator review."""
+    """Show moderator petitions and escalated reports for administrator review."""
     _require_admin(current_user)
+
+    mod_petitions = session.exec(
+        select(ModPetition, User)
+        .join(User, ModPetition.user_id == User.id)
+        .where(ModPetition.Reviewed.is_(False))
+        .order_by(ModPetition.created_at.asc())
+    ).all()
 
     target_user = aliased(User)
     user_reporter = aliased(User)
@@ -65,9 +72,62 @@ async def admin_reports_page(
         "users/admin_reports.html",
         {
             "user": current_user,
+            "mod_petitions": mod_petitions,
             "user_reports": user_reports,
             "item_reports": item_reports,
         },
+    )
+
+@router.post("/mod-petitions/{petition_id}/approve")
+async def approve_mod_petition(
+    petition_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Approve a moderator petition and promote its applicant."""
+    _require_admin(current_user)
+    petition = session.get(ModPetition, petition_id)
+    if not petition:
+        raise HTTPException(status_code=404, detail="Moderator petition not found")
+    if petition.Reviewed:
+        raise HTTPException(status_code=409, detail="Moderator petition already reviewed")
+
+    applicant = session.get(User, petition.user_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+    if applicant.role != UserRole.USER:
+        raise HTTPException(
+            status_code=409,
+            detail="Only regular users can be promoted to moderator",
+        )
+
+    applicant.role = UserRole.MODERATOR
+    petition.Reviewed = True
+    petition.approved = True
+    session.commit()
+    return RedirectResponse(
+        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
+    )
+
+@router.post("/mod-petitions/{petition_id}/reject")
+async def reject_mod_petition(
+    petition_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Reject a pending moderator petition."""
+    _require_admin(current_user)
+    petition = session.get(ModPetition, petition_id)
+    if not petition:
+        raise HTTPException(status_code=404, detail="Moderator petition not found")
+    if petition.Reviewed:
+        raise HTTPException(status_code=409, detail="Moderator petition already reviewed")
+
+    petition.Reviewed = True
+    petition.approved = False
+    session.commit()
+    return RedirectResponse(
+        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
     )
 
 @router.post("/admin-reports/users/{user_id}/delete")
