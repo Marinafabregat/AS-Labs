@@ -1,5 +1,6 @@
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Category, Item, Purchase, Like, ItemReport, UserReport, ModPetition
+from sqlalchemy import inspect, text
 import os
 
 # Define our SQLite
@@ -27,6 +28,19 @@ def init_db():
     This should be called by the application on startup
     """
     SQLModel.metadata.create_all(engine)
+
+    # Lightweight migration for databases created before the ban feature.
+    inspector = inspect(engine)
+    if "user" in inspector.get_table_names():
+        user_columns = {column["name"] for column in inspector.get_columns("user")}
+        if "is_banned" not in user_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE user "
+                        "ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
     
 
 def get_session():

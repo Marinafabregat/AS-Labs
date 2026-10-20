@@ -96,11 +96,19 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    if user.is_banned:
+        return templates.TemplateResponse(
+            request,
+            "users/login.html",
+            {"error": "Account permanently banned. Access denied."},
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     if user.is_blacklisted:
         return templates.TemplateResponse(
             request,
             "users/login.html",
-            {"error": "Account is blacklisted. Access denied."},
+            {"error": "Account temporarily suspended pending admin review."},
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
