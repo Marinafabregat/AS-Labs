@@ -143,11 +143,25 @@
                             · Reported by {{ reporter.username }} on {{ report.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </p>
                     </div>
-                    <span class="bg-rose-100 text-rose-800 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">{{ report.status.value }}</span>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="bg-rose-100 text-rose-800 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">{{ report.status.value }}</span>
+                        {% if item.is_blacklisted %}
+                        <span class="bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">Temporarily blacklisted</span>
+                        {% endif %}
+                    </div>
                 </div>
                 <p class="text-sm text-slate-700 mt-3 whitespace-pre-wrap">{{ report.reason }}</p>
-                
+
+                <p class="text-xs text-slate-500 mt-3">
+                    The moderator temporarily blacklisted this listing. Revert the action to make it visible again, or delete it permanently.
+                </p>
+
                 <div class="flex flex-wrap gap-2 mt-4">
+                    <form action="/admin/admin-reports/items/{{ report.id }}/revert" method="POST" onsubmit="return confirm('Revert the blacklist and make this listing visible again?');">
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
+                            Revert blacklist
+                        </button>
+                    </form>
                     <form action="/admin/admin-reports/items/{{ item.id }}/delete" method="POST" onsubmit="return confirm('Are you sure you want to delete this listing?');">
                         <button type="submit" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                             Delete Item

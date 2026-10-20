@@ -1,5 +1,15 @@
 from sqlmodel import SQLModel, create_engine, Session, select
-from models import User, Category, Item, Purchase, Like, ItemReport, UserReport, ModPetition
+from models import (
+    Category,
+    Item,
+    ItemReport,
+    Like,
+    ModPetition,
+    Purchase,
+    ReportStatus,
+    User,
+    UserReport,
+)
 from sqlalchemy import inspect, text
 import os
 
@@ -41,7 +51,23 @@ def init_db():
                         "ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT 0"
                     )
                 )
-    
+
+    with Session(engine) as session:
+        blacklisted_items = session.exec(
+            select(Item).where(Item.is_blacklisted.is_(True))
+        ).all()
+        for item in blacklisted_items:
+            active_escalation = session.exec(
+                select(ItemReport.id).where(
+                    ItemReport.item_id == item.id,
+                    ItemReport.status == ReportStatus.FOR_ADMIN,
+                )
+            ).first()
+            if not active_escalation:
+                item.is_blacklisted = False
+                session.add(item)
+        session.commit()
+
 
 def get_session():
     """Generator for the Session object, used as dependency in requests

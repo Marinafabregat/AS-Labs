@@ -271,6 +271,42 @@ async def admin_delete_user(
         url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
     )
 
+@router.post("/admin-reports/items/{report_id}/revert")
+async def admin_revert_item_report(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Revert a moderator's temporary blacklist on a reported item."""
+    _require_admin(current_user)
+    report = session.get(ItemReport, report_id)
+    if not report or report.status != ReportStatus.FOR_ADMIN:
+        raise HTTPException(
+            status_code=404, detail="Escalated item report not found"
+        )
+
+    item = session.get(Item, report.item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Reported item not found")
+
+    escalated_reports = session.exec(
+        select(ItemReport).where(
+            ItemReport.item_id == item.id,
+            ItemReport.status == ReportStatus.FOR_ADMIN,
+        )
+    ).all()
+    for escalated_report in escalated_reports:
+        escalated_report.status = ReportStatus.DISMISSED
+        session.add(escalated_report)
+
+    item.is_blacklisted = False
+    session.add(item)
+    session.commit()
+    return RedirectResponse(
+        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
+    )
+
+
 @router.post("/admin-reports/items/{item_id}/delete")
 async def admin_delete_item(
     item_id: int,
