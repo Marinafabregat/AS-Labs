@@ -22,7 +22,7 @@ from sqlmodel import Session, select
 from db import engine, init_db, get_session
 from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
-from routes import users, auth, items, mod, admin
+from routes import users, oauth_routes, items, mod, admin
 from template_context import templates
 
 load_dotenv()
@@ -172,7 +172,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(users.router)
-app.include_router(auth.router)
+app.include_router(oauth_routes.router)
 app.include_router(items.router)
 app.include_router(mod.router)
 app.include_router(admin.router)
