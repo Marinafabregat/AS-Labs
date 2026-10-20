@@ -66,6 +66,24 @@ def init_db():
             if not active_escalation:
                 item.is_blacklisted = False
                 session.add(item)
+
+        blacklisted_users = session.exec(
+            select(User).where(
+                User.is_blacklisted.is_(True),
+                User.is_banned.is_(False),
+            )
+        ).all()
+        for user in blacklisted_users:
+            active_escalation = session.exec(
+                select(UserReport.id).where(
+                    UserReport.target_user_id == user.id,
+                    UserReport.status == ReportStatus.FOR_ADMIN,
+                )
+            ).first()
+            if not active_escalation:
+                user.is_blacklisted = False
+                session.add(user)
+
         session.commit()
 
 

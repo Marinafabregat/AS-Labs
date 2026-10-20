@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
-from auth import get_current_user, get_session
+from auth import get_current_active_user, get_session
 from models import User
 from oauth import oauth
 from security_encryption import encrypt_secret
@@ -171,7 +171,7 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
 
 
 @router.get("/unlink")
-async def unlink_google(request: Request, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+async def unlink_google(request: Request, current_user: User = Depends(get_current_active_user), session: Session = Depends(get_session)):
     """Unlink Google account from current user."""
     if current_user.oauth_provider == "google" and current_user.hashed_password is None:
         raise HTTPException(
