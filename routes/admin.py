@@ -147,20 +147,18 @@ async def admin_revert_user_report(
             detail="This user is permanently banned. Unban them first.",
         )
 
-    report.status = ReportStatus.DISMISSED
-    session.add(report)
-
-    other_active_reports = session.exec(
-        select(UserReport.id).where(
+    escalated_reports = session.exec(
+        select(UserReport).where(
             UserReport.target_user_id == target_user.id,
             UserReport.status == ReportStatus.FOR_ADMIN,
-            UserReport.id != report.id,
         )
-    ).first()
-    if not other_active_reports:
-        target_user.is_blacklisted = False
-        session.add(target_user)
+    ).all()
+    for escalated_report in escalated_reports:
+        escalated_report.status = ReportStatus.DISMISSED
+        session.add(escalated_report)
 
+    target_user.is_blacklisted = False
+    session.add(target_user)
     session.commit()
     return RedirectResponse(
         url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
