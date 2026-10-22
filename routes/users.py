@@ -96,11 +96,19 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    if user.is_banned:
+        return templates.TemplateResponse(
+            request,
+            "users/login.html",
+            {"error": "Account permanently banned. Access denied."},
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     if user.is_blacklisted:
         return templates.TemplateResponse(
             request,
             "users/login.html",
-            {"error": "Account is blacklisted. Access denied."},
+            {"error": "Account temporarily suspended pending admin review."},
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
@@ -339,11 +347,23 @@ async def report_user(
     if target_user.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot report yourself")
 
+    report_status = (
+        ReportStatus.FOR_ADMIN
+        if current_user.role != UserRole.USER
+        else ReportStatus.PENDING
+    )
+
     user_report = UserReport(
         target_user_id=target_user.id,
         reporter_id=current_user.id,
         reason=reason.strip() or "No reason provided",
+        status=report_status,
     )
+
+    if report_status == ReportStatus.FOR_ADMIN:
+        target_user.is_blacklisted = True
+        session.add(target_user)
+
     session.add(user_report)
     session.commit()
 

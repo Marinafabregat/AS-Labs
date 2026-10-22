@@ -61,10 +61,15 @@ def get_current_user_optional(request: Request, session: Session = Depends(get_s
 
 
 def get_current_active_user(user: User = Depends(get_current_user)) -> User:
+    if user.is_banned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been permanently banned. Access denied."
+        )
     if user.is_blacklisted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been blacklisted. Access denied."
+            detail="Your account is temporarily suspended pending admin review."
         )
     return user
 

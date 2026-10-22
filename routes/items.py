@@ -470,6 +470,18 @@ async def report_item(
             status_code=400, detail="You cannot report your own listing"
         )
 
+    if current_user.role == UserRole.ADMIN:
+        if item.image_filename and item.image_filename not in [
+            "keyboard.jpg",
+            "textbook.jpg",
+        ]:
+            file_path = UPLOAD_DIR / item.image_filename
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink()
+        session.delete(item)
+        session.commit()
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+
     new_report = ItemReport(
         item_id=item.id,
         reporter_id=current_user.id,

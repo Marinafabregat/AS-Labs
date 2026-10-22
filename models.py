@@ -42,7 +42,10 @@ class User(SQLModel, table=True):
     email: str = Field(nullable=False, unique=True, index=True)
     hashed_password: Optional[str] = Field(default=None)
     role: UserRole = Field(default=UserRole.USER)
+    # is_blacklisted means the account is currently blocked (temporary or permanent).
+    # is_banned means an admin confirmed a permanent ban.
     is_blacklisted: bool = Field(default=False)
+    is_banned: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Encrypted PII Delivery Fields

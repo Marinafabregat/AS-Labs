@@ -18,13 +18,14 @@ AS/
 ├── models.py
 ├── db.py
 ├── auth.py
+├── oauth.py
 ├── service.py
 ├── REQUIREMENTS.txt
 ├── .env
 ├── uploads/
 │   └── images or other files (this we have to encrypt)
 ├── routes/
-│   └── admin.py,items.py,mod.py,users.py
+│   └── admin.py,items.py,mod.py,oauth_routes.py,users.py
 ├── static/
 │   └── (css, js, images)
 └── templates/
@@ -37,7 +38,9 @@ models.py: stores the models for the db tables
 db.py: holds the functions to begin the db engince with which we can handle the database
 
 (These two files might need to be adapted)
-auth.py: handles access control, token generation, passwords, etc. 
+auth.py: handles password hashing, current-user dependencies and access control.
+oauth.py: configures the Google OAuth client.
+routes/oauth_routes.py: handles Google OAuth login, account linking and unlinking.
 service.py: holds the oauth2 scheme
 ---
 

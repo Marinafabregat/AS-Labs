@@ -174,9 +174,7 @@ async def dismiss_item_report(
     still_reported = session.exec(
         select(ItemReport.id).where(
             ItemReport.item_id == item.id,
-            ItemReport.status.in_(
-                [ReportStatus.PENDING, ReportStatus.FOR_ADMIN]
-            ),
+            ItemReport.status == ReportStatus.FOR_ADMIN,
             ItemReport.id != report.id,
         )
     ).first()

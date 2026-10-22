@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
-from auth import get_current_user, get_session
+from auth import get_current_active_user, get_session
 from models import User
 from oauth import oauth
 from security_encryption import encrypt_secret
@@ -12,11 +12,15 @@ from template_context import templates
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-def _blacklist_denied(request: Request):
+def _blacklist_denied(request: Request, user: User):
+    if user.is_banned:
+        message = "Account permanently banned. Access denied."
+    else:
+        message = "Account temporarily suspended pending admin review."
     return templates.TemplateResponse(
         request,
         "auth/login.html",
-        {"error": "Account is blacklisted. Access denied."},
+        {"error": message},
         status_code=status.HTTP_403_FORBIDDEN,
     )
 
@@ -66,8 +70,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     user = session.exec(select(User).where(User.oauth_id == oauth_id)).first()
 
     if user:
-        if user.is_blacklisted:
-            return _blacklist_denied(request)
+        if user.is_blacklisted or user.is_banned:
+            return _blacklist_denied(request, user)
         # Update tokens (encrypted at rest)
         user.oauth_access_token = encrypt_secret(token.get("access_token"))
         user.oauth_refresh_token = encrypt_secret(token.get("refresh_token"))
@@ -81,8 +85,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     existing_user = session.exec(select(User).where(User.email == email)).first()
 
     if existing_user:
-        if existing_user.is_blacklisted:
-            return _blacklist_denied(request)
+        if existing_user.is_blacklisted or existing_user.is_banned:
+            return _blacklist_denied(request, existing_user)
         # Store OAuth info in session for linking confirmation
         request.session["pending_oauth_link"] = {
             "email": email,
@@ -145,9 +149,9 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
     email = oauth_data["email"]
     user = session.exec(select(User).where(User.email == email)).first()
 
-    if user and user.is_blacklisted:
+    if user and (user.is_blacklisted or user.is_banned):
         request.session.pop("pending_oauth_link", None)
-        return _blacklist_denied(request)
+        return _blacklist_denied(request, user)
 
     if user:
         user.oauth_provider = "google"
@@ -167,7 +171,7 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
 
 
 @router.get("/unlink")
-async def unlink_google(request: Request, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+async def unlink_google(request: Request, current_user: User = Depends(get_current_active_user), session: Session = Depends(get_session)):
     """Unlink Google account from current user."""
     if current_user.oauth_provider == "google" and current_user.hashed_password is None:
         raise HTTPException(
