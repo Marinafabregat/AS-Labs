@@ -123,7 +123,7 @@ async def profile_page(
     current_user: User = Depends(get_current_active_user),
 ):
     """Display profile page with decrypted PII delivery info for the user."""
-    # Decrypt sensitive fields for template rendering view
+    #decrypt sensitive fields
     user_data = {
         **current_user.model_dump(),
         "delivery_address_line1": decrypt_pii(current_user.delivery_address_line1),
