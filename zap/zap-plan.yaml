@@ -1,0 +1,143 @@
+---
+env:
+  contexts:
+    - name: vinsec
+      urls:
+        - "http://app:8000"
+      includePaths:
+        - "http://app:8000.*"
+      excludePaths:
+        # OAuth flow cannot be completed by ZAP without a real Google account.
+        - "http://app:8000/auth/google.*"
+        - "http://app:8000/auth/callback.*"
+        - "http://app:8000/auth/link.*"
+        - "http://app:8000/auth/unlink.*"
+        # Logout/delete endpoints would break the authenticated session mid-scan.
+        - "http://app:8000/users/logout.*"
+        - "http://app:8000/auth/logout.*"
+        - "http://app:8000/users/delete.*"
+        - "http://app:8000/items/.*/delete.*"
+        # Account/state-changing forms. The active scan would otherwise rewrite
+        # the seed users' passwords and invalidate their sessions mid-scan.
+        - "http://app:8000/users/update.*"
+        - "http://app:8000/users/register.*"
+        - "http://app:8000/users/mod-petition.*"
+        - "http://app:8000/items/create.*"
+        - "http://app:8000/items/.*/edit.*"
+        - "http://app:8000/items/.*/like.*"
+        - "http://app:8000/items/.*/buy.*"
+        # A report from a moderator/admin can blacklist another seed user,
+        # which would break the session used by the next scan phase.
+        - "http://app:8000/users/.*/report.*"
+        - "http://app:8000/items/.*/report.*"
+        # Moderator state-changing actions. The moderator pages are still scanned.
+        - "http://app:8000/mod/moderator-reports/users/.*/accept.*"
+        - "http://app:8000/mod/moderator-reports/users/.*/dismiss.*"
+        - "http://app:8000/mod/moderator-reports/items/.*/accept.*"
+        - "http://app:8000/mod/moderator-reports/items/.*/dismiss.*"
+        # Irreversible admin actions. The admin pages are still spidered and scanned.
+        - "http://app:8000/admin/admin-reports/users/.*/ban.*"
+        - "http://app:8000/admin/admin-reports/users/.*/delete.*"
+        - "http://app:8000/admin/admin-reports/users/.*/unban.*"
+        - "http://app:8000/admin/admin-reports/users/.*/revert.*"
+        - "http://app:8000/admin/admin-reports/items/.*/delete.*"
+        - "http://app:8000/admin/admin-reports/items/.*/revert.*"
+        - "http://app:8000/admin/mod-petitions/.*/approve.*"
+        - "http://app:8000/admin/mod-petitions/.*/reject.*"
+      authentication:
+        method: form
+        parameters:
+          loginPageUrl: "http://app:8000/users/login"
+          loginRequestUrl: "http://app:8000/users/login"
+          loginRequestBody: "username={%username%}&password={%password%}"
+        verification:
+          method: poll
+          loggedInRegex: "Logout"
+          loggedOutRegex: "Not authenticated"
+          pollFrequency: 60
+          pollUnits: requests
+          pollUrl: "http://app:8000/users/profile"
+          pollPostData: ""
+      sessionManagement:
+        method: cookie
+        parameters: {}
+      users:
+        - name: alice
+          credentials:
+            username: alice_seller
+            password: user123
+        - name: moderator
+          credentials:
+            username: moderator
+            password: mod123
+        - name: admin
+          credentials:
+            username: admin
+            password: admin123
+
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    continueOnFailure: true
+    progressToStdout: true
+    maxDuration: 1800
+
+jobs:
+  - type: insights
+    parameters:
+      # Never abort the plan automatically on a high-level insight (for example
+      # an authentication failure). The remaining jobs and reports must still run.
+      exitAutoLevel: ""
+  - type: spider
+    parameters:
+      context: vinsec
+      user: alice
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: activeScan
+    parameters:
+      context: vinsec
+      user: alice
+      maxRuleDurationInMins: 1
+      maxScanDurationInMins: 5
+
+  - type: spider
+    parameters:
+      context: vinsec
+      user: moderator
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: activeScan
+    parameters:
+      context: vinsec
+      user: moderator
+      maxRuleDurationInMins: 1
+      maxScanDurationInMins: 5
+
+  - type: spider
+    parameters:
+      context: vinsec
+      user: admin
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: activeScan
+    parameters:
+      context: vinsec
+      user: admin
+      maxRuleDurationInMins: 1
+      maxScanDurationInMins: 5
+
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report

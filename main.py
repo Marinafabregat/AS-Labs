@@ -31,7 +31,7 @@ load_dotenv()
 project_root = Path(__file__).parent
 uploads_dir = project_root / "uploads"
 uploads_dir.mkdir(exist_ok=True)
-db_path = project_root / "database.db"
+db_path = Path(engine.url.database) if engine.url.database else project_root / "database.db"
 
 
 def seed_default_data(engine):
