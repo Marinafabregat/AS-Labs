@@ -24,6 +24,7 @@ from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
 from routes import users, oauth_routes, items, mod, admin
 from template_context import templates
+from image_storage import save_image, migrate_plaintext_uploads
 
 load_dotenv()
 
@@ -42,12 +43,11 @@ def seed_default_data(engine):
             print("Default data already seeded.")
             return
 
-        # Copia las imágenes de semilla desde static/ a uploads/ sin cambiar el nombre
+        # Seed images: encrypted straight from static/ into uploads/<name>.enc (never plaintext)
         for seed_img in ["keyboard.jpg", "textbook.jpg"]:
             src = project_root / "static" / seed_img
-            dst = uploads_dir / seed_img
-            if src.exists() and not dst.exists():
-                shutil.copy(src, dst)
+            if src.exists():
+                save_image(seed_img, src.read_bytes())
 
         # 1. Usuarios iniciales
         admin_user = User(
@@ -139,6 +139,10 @@ def seed_default_data(engine):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Encrypt any plaintext image left in uploads/ (legacy uploads)
+    n = migrate_plaintext_uploads()
+    if n:
+        print(f"Encrypted {n} plaintext image(s) at rest.")
     if db_path.exists():
         print("database.db already exists, delete file if you'd like to start with default values")
         init_db()
@@ -170,7 +174,8 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# NOTE: /uploads is intentionally NOT mounted. Images are encrypted at rest and only
+# served, decrypted, through the authorized route GET /items/{id}/image.
 app.include_router(users.router)
 app.include_router(oauth_routes.router)
 app.include_router(items.router)

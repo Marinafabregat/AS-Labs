@@ -1,6 +1,10 @@
 import os
 import base64
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load .env BEFORE reading keys below (this module is imported before main.py calls load_dotenv)
+load_dotenv()
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -43,30 +47,39 @@ def decrypt_secret(ciphertext: Optional[str]) -> Optional[str]:
 
 
 # --- 2. ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM) ---
-DEFAULT_IMAGE_KEY_HEX = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-ENV_IMAGE_KEY = os.getenv("IMAGE_ENCRYPTION_KEY")
-IMAGE_KEY = base64.b64decode(ENV_IMAGE_KEY) if ENV_IMAGE_KEY else bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
+# The key MUST come from the environment (base64 of exactly 32 random bytes).
+# There is deliberately no hardcoded fallback: a key in the source code is no key at all.
+#   python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+def _load_image_key() -> bytes:
+    raw = os.getenv("IMAGE_ENCRYPTION_KEY")
+    if not raw:
+        raise RuntimeError("IMAGE_ENCRYPTION_KEY is not set (base64-encoded 32-byte key required)")
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise RuntimeError("IMAGE_ENCRYPTION_KEY is not valid base64") from exc
+    if len(key) != 32:
+        raise RuntimeError(f"IMAGE_ENCRYPTION_KEY must decode to 32 bytes (AES-256), got {len(key)}")
+    return key
 
-aesgcm = AESGCM(IMAGE_KEY)
+aesgcm = AESGCM(_load_image_key())
 
-def encrypt_image(image_bytes: bytes) -> bytes:
-    """Encripta bytes de imagen con AES-256-GCM.
-    Genera un nonce único de 12 bytes y lo concatena al inicio del contenido cifrado.
+def encrypt_image(image_bytes: bytes, aad: Optional[bytes] = None) -> bytes:
+    """Encrypt image bytes with AES-256-GCM.
+
+    A fresh random 96-bit nonce is generated per call and prepended to the output:
+    nonce (12 bytes) || ciphertext || GCM tag (16 bytes).
+    `aad` (associated data) is authenticated but not encrypted; we bind it to the
+    stored filename so a ciphertext cannot be swapped between files undetected.
     """
     if not image_bytes:
         return b""
-    
-    nonce = os.urandom(12)  # Nonce de 96 bits recomendado para GCM
-    ciphertext = aesgcm.encrypt(nonce, image_bytes, associated_data=None)
-    
-    return nonce + ciphertext
+    nonce = os.urandom(12)
+    return nonce + aesgcm.encrypt(nonce, image_bytes, aad)
 
-def decrypt_image(encrypted_data: bytes) -> bytes:
-    """Extrae el nonce de los primeros 12 bytes y desencripta el resto del contenido."""
-    if not encrypted_data or len(encrypted_data) < 12:
-        return b""
-    
-    nonce = encrypted_data[:12]
-    ciphertext = encrypted_data[12:]
-    
-    return aesgcm.decrypt(nonce, ciphertext, associated_data=None)
+def decrypt_image(encrypted_data: bytes, aad: Optional[bytes] = None) -> bytes:
+    """Split off the nonce and decrypt. Raises cryptography.exceptions.InvalidTag
+    if the data was tampered with, the key is wrong, or the aad does not match."""
+    if not encrypted_data or len(encrypted_data) < 12 + 16:
+        raise ValueError("Encrypted image is truncated or empty")
+    return aesgcm.decrypt(encrypted_data[:12], encrypted_data[12:], aad)
