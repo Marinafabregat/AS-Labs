@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Home - VINSEC Marketplace{% endblock %}
+
+{% block content %}
+
+  {% if not user %}
+  
+    <!-- 1. HERO BANNER PARA VISITANTES -->
+    <div class="bg-gradient-to-r from-emerald-800 to-teal-700 rounded-3xl p-8 sm:p-12 text-white shadow-sm mb-10 text-center">
+      <div class="max-w-2xl mx-auto space-y-4">
+        
+        <span class="bg-emerald-900/60 text-emerald-200 text-xs font-semibold px-3.5 py-1 rounded-full inline-block border border-emerald-500/30 uppercase tracking-wider">
+          Secure Marketplace
+        </span>
+
+        <h1 class="text-3xl sm:text-5xl font-black tracking-tight leading-tight">
+          Buy & Sell Second-Hand Items, Securely.
+        </h1>
+
+        <p class="text-emerald-100 text-sm sm:text-base leading-relaxed max-w-xl mx-auto">
+          Welcome to VINSEC. A second-hand marketplace web application protected with attribute-based access control, role-based rules, and content security.
+        </p>
+
+        <div class="flex flex-wrap justify-center gap-4 pt-3">
+          <a href="/users/register" class="bg-white text-emerald-800 hover:bg-emerald-50 font-bold px-6 py-3 rounded-xl text-sm transition shadow-sm">
+            Register Account
+          </a>
+          <a href="/users/login" class="border border-white hover:bg-emerald-700 text-white font-semibold px-6 py-3 rounded-xl text-sm transition">
+            Log In
+          </a>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 2. CÓMO FUNCIONA (SOLO VISITANTES) -->
+    <section class="mb-12">
+      <h2 class="text-2xl font-bold text-slate-900 mb-6 text-center">How VINSEC Works</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+          <div class="w-8 h-8 bg-emerald-100 text-emerald-800 rounded-lg flex items-center justify-center font-bold text-sm">1</div>
+          <h3 class="font-bold text-slate-800 text-sm">Post an Item</h3>
+          <p class="text-slate-500 text-xs leading-relaxed">
+            Registered users can upload items with a title, price, description, category, and mandatory photo.
+          </p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+          <div class="w-8 h-8 bg-emerald-100 text-emerald-800 rounded-lg flex items-center justify-center font-bold text-sm">2</div>
+          <h3 class="font-bold text-slate-800 text-sm">Buy & Like Items</h3>
+          <p class="text-slate-500 text-xs leading-relaxed">
+            Browse the marketplace, save favorite items to your profile, and purchase products with one click.
+          </p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+          <div class="w-8 h-8 bg-emerald-100 text-emerald-800 rounded-lg flex items-center justify-center font-bold text-sm">3</div>
+          <h3 class="font-bold text-slate-800 text-sm">Role-Based Protection</h3>
+          <p class="text-slate-500 text-xs leading-relaxed">
+            Moderators soft-hide reported posts, while Admins manage elevated permissions and user accounts.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 3. PREGUNTAS FRECUENTES (SOLO VISITANTES) -->
+    <section class="max-w-3xl mx-auto mb-12">
+      <h2 class="text-2xl font-bold text-slate-900 mb-6 text-center">Frequently Asked Questions</h2>
+      <div class="space-y-4">
+        
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="font-bold text-slate-900 text-sm mb-2">What is VINSEC?</h3>
+          <p class="text-slate-600 text-xs leading-relaxed">
+            VINSEC is a second-hand online marketplace project combining Vinted features with web application security controls.
+          </p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="font-bold text-slate-900 text-sm mb-2">How are user permissions handled?</h3>
+          <p class="text-slate-600 text-xs leading-relaxed">
+            Permissions are divided into 3 levels: Users (Level 1), Moderators (Level 2), and Admins (Level 3) managed via JWT sessions and access rules.
+          </p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="font-bold text-slate-900 text-sm mb-2">How do I request moderator status?</h3>
+          <p class="text-slate-600 text-xs leading-relaxed">
+            Standard users can submit a petition through their dashboard once logged in. Administrators review and approve requests.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+  {% else %}
+   
+    <!-- DASHBOARD Y CATÁLOGO PARA USUARIOS AUTENTICADOS -->
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <div class="flex items-center space-x-2 mb-1">
+            <h2 class="text-xl font-bold text-slate-900">Welcome back, {{ user.username }}!</h2>
+            <span class="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase">
+              {{ user.role.value if user.role.value else user.role }}
+            </span>
+          </div>
+          <p class="text-slate-500 text-xs">Browse items, save favorites, or post a new product for sale.</p>
+        </div>
+
+        <a href="/items/create" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-4 rounded-xl text-xs transition shadow-sm">
+          + Post Item for Sale
+        </a>
+      </div>
+
+      {% if user.role.value|lower == 'user' or user.role == 'user' or user.role.value == 'USER' %}
+        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+          <h3 class="font-bold text-slate-800 text-xs mb-1">Request Moderator Access</h3>
+          <p class="text-slate-500 text-[11px] mb-2.5">Submit a petition to help moderate posts and handle user reports.</p>
+          <form action="/users/mod-petition" method="post" class="space-y-2.5">
+            <textarea name="message" placeholder="Why would you like to become a moderator?" rows="2" 
+                      class="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 transition" required></textarea>
+            <button type="submit" class="bg-slate-800 hover:bg-slate-900 text-white font-semibold py-1.5 px-3.5 rounded-lg text-xs transition">
+              Submit Petition
+            </button>
+          </form>
+        </div>
+      {% endif %}
+
+      {% if user.role.value|lower == 'admin' or user.role == 'admin' or user.role.value == 'ADMIN' %}
+        <div class="bg-purple-50 border border-purple-200 p-4 rounded-xl text-purple-900 mt-4 text-xs">
+          <p class="font-bold mb-1">👑 Administrator Panel (Level 3 Access)</p>
+          <p>Full access permissions: Elevate users, review moderator petitions, and delete reported posts.</p>
+        </div>
+      {% endif %}
+
+      {% if user.role.value|lower == 'moderator' or user.role == 'moderator' or user.role.value == 'MODERATOR' %}
+        <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl text-blue-900 mt-4 text-xs">
+          <p class="font-bold mb-1">🛡️ Moderator Panel (Level 2 Access)</p>
+          <p>Moderator permissions: Report/soft-hide flagged items and clear user reports.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    <section>
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="text-xl font-bold text-slate-900">Explore Items for Sale</h3>
+        <a href="/items/liked" class="text-xs font-semibold text-emerald-700 hover:underline">❤️ View Saved Items</a>
+      </div>
+
+      {% if items %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+          {% for item in items %}
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition relative">
+              <div>
+                <div class="h-40 bg-slate-100 overflow-hidden relative">
+                  
+                  <!-- Badge para productos reportados/bajo revisión -->
+                  {% if item.is_blacklisted %}
+                    <span class="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow-md z-10 flex items-center gap-1">
+                      ⚠️ Under Review
+                    </span>
+                  {% endif %}
+
+                  {% if item.image_filename %}
+                    <img src="/items/{{ item.id }}/image" alt="{{ item.title }}" 
+                         class="w-full h-full object-cover {% if item.is_blacklisted %}opacity-60 grayscale-[30%]{% endif %}">
+                  {% else %}
+                    <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Image</div>
+                  {% endif %}
+
+                  <span class="absolute top-2 right-2 bg-slate-900/80 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+                    {{ "%.2f"|format(item.price) }} €
+                  </span>
+                </div>
+
+                <div class="p-3.5">
+                  <h4 class="font-bold text-slate-900 truncate text-xs mb-1">{{ item.title }}</h4>
+                  <p class="text-slate-500 text-[11px] line-clamp-2">{{ item.description }}</p>
+                </div>
+              </div>
+
+              <div class="p-3.5 pt-0">
+                <a href="/items/{{ item.id }}" 
+                   class="block w-full text-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold py-1.5 rounded-lg text-xs transition">
+                  View Details
+                </a>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 max-w-sm mx-auto my-6">
+          <span class="text-3xl block mb-2">📦</span>
+          <p class="text-slate-600 text-xs font-medium mb-3">No items published yet.</p>
+          <a href="/items/create" class="inline-block bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded-xl text-xs transition">
+            + Post First Item
+          </a>
+        </div>
+      {% endif %}
+    </section>
+
+  {% endif %}
+
+{% endblock %}
