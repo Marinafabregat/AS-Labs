@@ -1,0 +1,16 @@
+services:
+  app:
+    container_name: vinsec-app-scan
+    environment:
+      # ZAP scans http://app:8000 inside the Docker network, so the session
+      # cookie must not be marked Secure for the scan to stay authenticated.
+      SESSION_HTTPS_ONLY: "false"
+      # Throwaway database so the active scan cannot modify development data.
+      DATABASE_URL: "sqlite:////tmp/zap-scan.db"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      # Keep uploads created by the active scan out of the host uploads/ folder.
+      - scan_uploads:/app/project/uploads
+
+volumes:
+  scan_uploads:
