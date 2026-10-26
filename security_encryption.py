@@ -1,72 +1,82 @@
-import os
 import base64
+import logging
+import os
 from typing import Optional
-from cryptography.fernet import Fernet
+
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# --- 1. PII STRING ENCRYPTION (Fernet / AES-128-CBC) ---
-DEFAULT_PII_KEY = b"uV9M0_y2T-Z-X5c70H811vG53_64y5K5-64y5K5-64y="
-ENV_PII_KEY = os.getenv("PII_ENCRYPTION_KEY")
-PII_KEY = ENV_PII_KEY.encode("utf-8") if ENV_PII_KEY else DEFAULT_PII_KEY
+log = logging.getLogger("crypto")
+IN_DOCKER = os.path.exists("/app")
 
-fernet = Fernet(PII_KEY)
+# Claves SOLO de desarrollo. En Docker son obligatorias desde variables de entorno.
+DEFAULT_PII_KEY = "uV9M0_y2T-Z-X5c70H811vG53_64y5K5-64y5K5-64y="
+DEFAULT_IMAGE_KEY_HEX = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+
+def _require_env_or_dev_default(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    if IN_DOCKER:
+        raise RuntimeError(f"{name} es obligatoria en Docker/producción")
+    log.warning("%s no definida: usando clave de desarrollo INSEGURA", name)
+    return default
+
+
+# --- 1. PII y tokens: Fernet (AES-128-CBC + HMAC) ---
+fernet = Fernet(_require_env_or_dev_default("PII_ENCRYPTION_KEY", DEFAULT_PII_KEY).encode("utf-8"))
+
 
 def encrypt_pii(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
 
+
 def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
+    """Devuelve None si el descifrado falla. Nunca devuelve el texto cifrado."""
     if not ciphertext:
         return None
     try:
         return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-    except Exception:
-        return ciphertext
-
-
-# --- 1b. OAUTH / SECRET TOKEN ENCRYPTION (same Fernet key as PII) ---
-def encrypt_secret(text: Optional[str]) -> Optional[str]:
-    """Cifra un secreto (p.ej. un token OAuth) para almacenarlo en reposo."""
-    if not text:
+    except (InvalidToken, ValueError):
+        log.error("No se pudo descifrar un campo PII (clave incorrecta o dato corrupto)")
         return None
-    return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+# --- 1b. Tokens OAuth: mismo mecanismo ---
+def encrypt_secret(text: Optional[str]) -> Optional[str]:
+    return encrypt_pii(text)
 
 
 def decrypt_secret(ciphertext: Optional[str]) -> Optional[str]:
-    if not ciphertext:
-        return None
-    try:
-        return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-    except Exception:
-        return ciphertext
+    return decrypt_pii(ciphertext)
 
 
-# --- 2. ITEM IMAGE ENCRYPTION AT REST (AES-256-GCM) ---
-DEFAULT_IMAGE_KEY_HEX = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-ENV_IMAGE_KEY = os.getenv("IMAGE_ENCRYPTION_KEY")
-IMAGE_KEY = base64.b64decode(ENV_IMAGE_KEY) if ENV_IMAGE_KEY else bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
+# --- 2. Imágenes: AES-256-GCM ---
+_image_env = os.getenv("IMAGE_ENCRYPTION_KEY")
+if _image_env:
+    IMAGE_KEY = base64.b64decode(_image_env)
+else:
+    if IN_DOCKER:
+        raise RuntimeError("IMAGE_ENCRYPTION_KEY es obligatoria en Docker/producción")
+    log.warning("IMAGE_ENCRYPTION_KEY no definida: usando clave de desarrollo INSEGURA")
+    IMAGE_KEY = bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
 
 aesgcm = AESGCM(IMAGE_KEY)
 
+
 def encrypt_image(image_bytes: bytes) -> bytes:
-    """Encripta bytes de imagen con AES-256-GCM.
-    Genera un nonce único de 12 bytes y lo concatena al inicio del contenido cifrado.
-    """
+    """Nonce de 12 bytes al inicio del resultado."""
     if not image_bytes:
         return b""
-    
-    nonce = os.urandom(12)  # Nonce de 96 bits recomendado para GCM
-    ciphertext = aesgcm.encrypt(nonce, image_bytes, associated_data=None)
-    
-    return nonce + ciphertext
+    nonce = os.urandom(12)
+    return nonce + aesgcm.encrypt(nonce, image_bytes, associated_data=None)
+
 
 def decrypt_image(encrypted_data: bytes) -> bytes:
-    """Extrae el nonce de los primeros 12 bytes y desencripta el resto del contenido."""
     if not encrypted_data or len(encrypted_data) < 12:
         return b""
-    
-    nonce = encrypted_data[:12]
-    ciphertext = encrypted_data[12:]
-    
+    nonce, ciphertext = encrypted_data[:12], encrypted_data[12:]
     return aesgcm.decrypt(nonce, ciphertext, associated_data=None)

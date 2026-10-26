@@ -1,55 +1,73 @@
+
+import logging
 import os
-import mimetypes
+import secrets
 import shutil
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from types import SimpleNamespace
-from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Form, Depends, Response
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.sessions import SessionMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker
-from sqlmodel import Session, select 
 
-from db import engine, init_db, get_session
-from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
-from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
-from routes import users, oauth_routes, items, mod, admin
-from template_context import templates
-
+# Debe ejecutarse ANTES de importar módulos que leen variables de entorno.
 load_dotenv()
 
-# Rutas globales del proyecto
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from sqlmodel import Session, select
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.sessions import SessionMiddleware
+
+from authz import can, item_attrs, init_authzforce
+from auth import get_current_user_optional, hash_password
+from db import engine, get_session, init_db
+from models import (
+    Category,
+    Item,
+    ItemReport,
+    Like,
+    ModPetition,
+    Purchase,
+    User,
+    UserRole,
+)
+from routes import admin, items, mod, oauth_routes, users
+from template_context import templates
+
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("app")
+
 project_root = Path(__file__).parent
 uploads_dir = project_root / "uploads"
 uploads_dir.mkdir(exist_ok=True)
-db_path = Path(engine.url.database) if engine.url.database else project_root / "database.db"
+
+db_path = (
+    Path(engine.url.database)
+    if engine.url.database
+    else project_root / "database.db"
+)
+
+IN_DOCKER = os.path.exists("/app")
 
 
 def seed_default_data(engine):
-    """Puebla la base de datos con información inicial de prueba para el marketplace."""
+    """Puebla la base de datos con información inicial de prueba."""
     with Session(engine) as session:
-        existing_users = session.exec(select(User)).first()
-        if existing_users:
-            print("Default data already seeded.")
+        if session.exec(select(User)).first():
+            log.info("Los datos iniciales ya existen.")
             return
 
-        # Copia las imágenes de semilla desde static/ a uploads/ sin cambiar el nombre
+        # Copiar imágenes de ejemplo si existen.
         for seed_img in ["keyboard.jpg", "textbook.jpg"]:
             src = project_root / "static" / seed_img
             dst = uploads_dir / seed_img
+
             if src.exists() and not dst.exists():
                 shutil.copy(src, dst)
 
-        # 1. Usuarios iniciales
+        # 1. Usuarios iniciales.
         admin_user = User(
             username="admin",
             email="admin@marketplace.com",
@@ -78,26 +96,36 @@ def seed_default_data(engine):
             role=UserRole.USER,
         )
 
-        session.add_all([admin_user, mod_user, seller_user, buyer_user])
+        session.add_all(
+            [admin_user, mod_user, seller_user, buyer_user]
+        )
         session.commit()
-        session.refresh(admin_user)
-        session.refresh(mod_user)
-        session.refresh(seller_user)
-        session.refresh(buyer_user)
 
-        # 2. Categorías iniciales
+        for user in (
+            admin_user,
+            mod_user,
+            seller_user,
+            buyer_user,
+        ):
+            session.refresh(user)
+
+        # 2. Categorías iniciales.
         cat_electronics = Category(name="Electronics")
         cat_books = Category(name="Books")
 
         session.add_all([cat_electronics, cat_books])
         session.commit()
+
         session.refresh(cat_electronics)
         session.refresh(cat_books)
 
-        # 3. Anuncios iniciales
+        # 3. Anuncios iniciales.
         item1 = Item(
             title="Vintage Mechanical Keyboard",
-            description="Fully working retro mechanical keyboard with tactile blue switches.",
+            description=(
+                "Fully working retro mechanical keyboard "
+                "with tactile blue switches."
+            ),
             price=75.00,
             image_filename="keyboard.jpg",
             seller_id=seller_user.id,
@@ -115,30 +143,45 @@ def seed_default_data(engine):
 
         session.add_all([item1, item2])
         session.commit()
+
         session.refresh(item1)
         session.refresh(item2)
 
-        # 4. Interacciones de prueba
-        item_like = Like(user_id=buyer_user.id, item_id=item1.id)
-        item_purchase = Purchase(buyer_id=buyer_user.id, item_id=item2.id, price_paid=25.50)
-        mod_report = ItemReport(
-            item_id=item1.id,
-            reporter_id=mod_user.id,
-            reason="Item title contains questionable keywords.",
-        )
-        mod_petition = ModPetition(
-            user_id=seller_user.id,
-            message="I'd like to apply to be a community moderator.",
+        # 4. Interacciones de prueba.
+        session.add_all(
+            [
+                Like(
+                    user_id=buyer_user.id,
+                    item_id=item1.id,
+                ),
+                Purchase(
+                    buyer_id=buyer_user.id,
+                    item_id=item2.id,
+                    price_paid=25.50,
+                ),
+                ItemReport(
+                    item_id=item1.id,
+                    reporter_id=mod_user.id,
+                    reason=(
+                        "Item title contains questionable keywords."
+                    ),
+                ),
+                ModPetition(
+                    user_id=seller_user.id,
+                    message=(
+                        "I'd like to apply to be a community moderator."
+                    ),
+                ),
+            ]
         )
 
-        session.add_all([item_like, item_purchase, mod_report, mod_petition])
         session.commit()
-
-        print("Default marketplace data seeded successfully.")
-
+        log.info("Datos iniciales del marketplace creados correctamente.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Obligatorio: sin política cargada, todo se deniega.
+    init_authzforce()
     if db_path.exists():
         print("database.db already exists, delete file if you'd like to start with default values")
         init_db()
@@ -150,27 +193,61 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="OnlineMarketplace-Application Security Assingment",
+    title="OnlineMarketplace-Application Security Assignment",
     description=(
-        "This application is the assignment for Application Security, where several security design principles are applied in a practical environment"
+        "Application Security assignment implementing security "
+        "design principles in an online marketplace."
     ),
     lifespan=lifespan,
 )
 
-# HTTPS termination: nginx in Docker, plain HTTP for local uvicorn dev
+
+# Configuración de sesiones.
+SESSION_SECRET = os.getenv("SESSION_SECRET_KEY")
+
+if not SESSION_SECRET:
+    if IN_DOCKER:
+        raise RuntimeError(
+            "SESSION_SECRET_KEY es obligatoria en Docker/producción"
+        )
+
+    SESSION_SECRET = secrets.token_urlsafe(32)
+    log.warning(
+        "SESSION_SECRET_KEY no definida: "
+        "se utiliza una clave temporal de desarrollo."
+    )
+
+
+# HTTPS en Docker/producción; HTTP local para desarrollo.
 env_https_only = os.getenv("SESSION_HTTPS_ONLY")
+
 if env_https_only is None:
-    env_https_only = "true" if os.path.exists("/app") else "false"
+    env_https_only = "true" if IN_DOCKER else "false"
+
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-in-production"),
+    secret_key=SESSION_SECRET,
     https_only=env_https_only.lower() == "true",
     same_site="lax",
+    max_age=60 * 60 * 8,
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Archivos estáticos e imágenes subidas.
+app.mount(
+    "/static",
+    StaticFiles(directory="static"),
+    name="static",
+)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory="uploads"),
+    name="uploads",
+)
+
+
+# Registrar las rutas de la aplicación.
 app.include_router(users.router)
 app.include_router(oauth_routes.router)
 app.include_router(items.router)
@@ -178,7 +255,7 @@ app.include_router(mod.router)
 app.include_router(admin.router)
 
 
-print("Marketplace application VINSEC started successfully.")
+log.info("Marketplace application VINSEC started successfully.")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -188,39 +265,72 @@ async def index(
     user=Depends(get_current_user_optional),
 ):
     categories = session.exec(select(Category)).all()
-    items = session.exec(select(Item)).all()
+    all_items = session.exec(select(Item)).all()
+
+    # La política XACML decide qué anuncios puede ver el usuario.
+    # Si AuthzForce no devuelve Permit, can() debe denegar el acceso.
+    visible_items = [
+        item
+        for item in all_items
+        if can(user, "read", "item", item_attrs(item))
+    ]
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"categories": categories, "items": items, "user": user},
+        context={
+            "categories": categories,
+            "items": visible_items,
+            "user": user,
+        },
     )
 
 
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+async def http_exception_handler(
+    request: Request,
+    exc: StarletteHTTPException,
+):
     return templates.TemplateResponse(
         request=request,
         name="error.html",
-        context={"status_code": exc.status_code, "detail": exc.detail},
+        context={
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+        },
         status_code=exc.status_code,
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
     return templates.TemplateResponse(
         request=request,
         name="error.html",
-        context={"status_code": 400, "detail": str(exc.errors())},
+        context={
+            "status_code": 400,
+            "detail": "Datos de formulario no válidos",
+        },
         status_code=400,
     )
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
+async def general_exception_handler(
+    request: Request,
+    exc: Exception,
+):
+    log.exception("Error no controlado")
+
     return templates.TemplateResponse(
         request=request,
         name="error.html",
-        context={"status_code": 500, "detail": str(exc)},
+        context={
+            "status_code": 500,
+            "detail": "Error interno del servidor",
+        },
         status_code=500,
     )

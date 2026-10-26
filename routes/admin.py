@@ -1,34 +1,152 @@
-from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
-from auth import (
-    get_current_active_user,
-    get_current_user,
-    get_current_user_optional,
-    hash_password,
-    verify_password,
+from auth import get_current_active_user
+from authz import (
+    admin_target_attrs,
+    enforce,
+    item_attrs,
+    item_report_attrs,
+    petition_review_attrs,
+    role_of,
+    user_report_attrs,
 )
 from db import get_session
-from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
-from security_encryption import encrypt_pii, decrypt_pii
+from models import (
+    Item,
+    ItemReport,
+    ModPetition,
+    ReportStatus,
+    User,
+    UserReport,
+    UserRole,
+)
 from template_context import templates
+
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-# MODERATOR REPORTS
+ADMIN_REPORTS_URL = "/admin/admin-reports"
 
 
-def _require_admin(current_user: User) -> None:
-    if current_user.role != UserRole.ADMIN:
+def _redirect_admin() -> RedirectResponse:
+    return RedirectResponse(
+        url=ADMIN_REPORTS_URL,
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+# ---------------------------------------------------------
+# LOADERS
+# Loaders only check that the record exists. Status checks happen
+# AFTER enforce(), so unauthorized users cannot learn a report's state.
+# ---------------------------------------------------------
+
+
+def _load_user_report(session: Session, report_id: int) -> UserReport:
+    report = session.get(UserReport, report_id)
+
+    if not report:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator privileges required.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User report not found",
         )
+
+    return report
+
+
+def _load_item_report(session: Session, report_id: int) -> ItemReport:
+    report = session.get(ItemReport, report_id)
+
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item report not found",
+        )
+
+    return report
+
+
+def _load_user(session: Session, user_id: UUID) -> User:
+    user = session.get(User, user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return user
+
+
+def _load_item(session: Session, item_id: int) -> Item:
+    item = session.get(Item, item_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
+
+    return item
+
+
+def _load_seller(session: Session, item: Item) -> User:
+    seller = session.get(User, item.seller_id)
+
+    if not seller:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seller not found",
+        )
+
+    return seller
+
+
+def _load_petition(session: Session, petition_id: int) -> ModPetition:
+    petition = session.get(ModPetition, petition_id)
+
+    if not petition:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Moderator petition not found",
+        )
+
+    return petition
+
+
+def _ensure_escalated_user_report(report: UserReport) -> None:
+    if report.status != ReportStatus.FOR_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Escalated user report not found",
+        )
+
+
+def _ensure_escalated_item_report(report: ItemReport) -> None:
+    if report.status != ReportStatus.FOR_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Escalated item report not found",
+        )
+
+
+def _ensure_not_reviewed(petition: ModPetition) -> None:
+    if petition.Reviewed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Moderator petition already reviewed",
+        )
+
+
+# ---------------------------------------------------------
+# ADMIN DASHBOARD
+# ---------------------------------------------------------
+
 
 @router.get("/admin-reports", response_class=HTMLResponse)
 async def admin_reports_page(
@@ -36,8 +154,8 @@ async def admin_reports_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Show moderator petitions and escalated reports for administrator review."""
-    _require_admin(current_user)
+    # XACML decides whether the user may open the admin area.
+    enforce(current_user, "view", "admin_action", {})
 
     mod_petitions = session.exec(
         select(ModPetition, User)
@@ -48,21 +166,35 @@ async def admin_reports_page(
 
     target_user = aliased(User)
     user_reporter = aliased(User)
+
     user_reports = session.exec(
         select(UserReport, target_user, user_reporter)
-        .join(target_user, UserReport.target_user_id == target_user.id)
-        .join(user_reporter, UserReport.reporter_id == user_reporter.id)
+        .join(
+            target_user,
+            UserReport.target_user_id == target_user.id,
+        )
+        .join(
+            user_reporter,
+            UserReport.reporter_id == user_reporter.id,
+        )
         .where(UserReport.status == ReportStatus.FOR_ADMIN)
         .order_by(UserReport.created_at.desc())
     ).all()
 
     item_seller = aliased(User)
     item_reporter = aliased(User)
+
     item_reports = session.exec(
         select(ItemReport, Item, item_seller, item_reporter)
         .join(Item, ItemReport.item_id == Item.id)
-        .join(item_seller, Item.seller_id == item_seller.id)
-        .join(item_reporter, ItemReport.reporter_id == item_reporter.id)
+        .join(
+            item_seller,
+            Item.seller_id == item_seller.id,
+        )
+        .join(
+            item_reporter,
+            ItemReport.reporter_id == item_reporter.id,
+        )
         .where(ItemReport.status == ReportStatus.FOR_ADMIN)
         .order_by(ItemReport.created_at.desc())
     ).all()
@@ -85,23 +217,39 @@ async def admin_reports_page(
         },
     )
 
+
+# ---------------------------------------------------------
+# USER REPORTS: BAN / REVERT / UNBAN
+# ---------------------------------------------------------
+
+
 @router.post("/admin-reports/users/{report_id}/ban")
 async def admin_ban_user_report(
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Confirm the permanent ban of a user escalated by a moderator."""
-    _require_admin(current_user)
-    report = session.get(UserReport, report_id)
-    if not report or report.status != ReportStatus.FOR_ADMIN:
-        raise HTTPException(
-            status_code=404, detail="Escalated user report not found"
-        )
+    report = _load_user_report(session, report_id)
+    target_user = _load_user(session, report.target_user_id)
 
-    target_user = session.get(User, report.target_user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Reported user not found")
+    # 1. XACML decides whether this admin may act on the escalated report.
+    enforce(
+        current_user,
+        "escalated_decide",
+        "report",
+        user_report_attrs(report, role_of(target_user)),
+    )
+
+    # 2. Business state check, only after authorization.
+    _ensure_escalated_user_report(report)
+
+    # 3. XACML decides whether this admin may ban this specific account.
+    enforce(
+        current_user,
+        "ban",
+        "admin_action",
+        admin_target_attrs(target_user.id),
+    )
 
     target_user.is_banned = True
     target_user.is_blacklisted = True
@@ -112,15 +260,15 @@ async def admin_ban_user_report(
             UserReport.status == ReportStatus.FOR_ADMIN,
         )
     ).all()
-    for active_report in active_reports:
-        active_report.status = ReportStatus.RESOLVED
-        session.add(active_report)
+
+    for active in active_reports:
+        active.status = ReportStatus.RESOLVED
+        session.add(active)
 
     session.add(target_user)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
 
 
 @router.post("/admin-reports/users/{report_id}/revert")
@@ -129,21 +277,28 @@ async def admin_revert_user_report(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Revert a moderator's temporary blacklist after admin review."""
-    _require_admin(current_user)
-    report = session.get(UserReport, report_id)
-    if not report or report.status != ReportStatus.FOR_ADMIN:
-        raise HTTPException(
-            status_code=404, detail="Escalated user report not found"
-        )
+    report = _load_user_report(session, report_id)
+    target_user = _load_user(session, report.target_user_id)
 
-    target_user = session.get(User, report.target_user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Reported user not found")
+    enforce(
+        current_user,
+        "escalated_decide",
+        "report",
+        user_report_attrs(report, role_of(target_user)),
+    )
+
+    _ensure_escalated_user_report(report)
+
+    enforce(
+        current_user,
+        "revert",
+        "admin_action",
+        admin_target_attrs(target_user.id),
+    )
 
     if target_user.is_banned:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="This user is permanently banned. Unban them first.",
         )
 
@@ -153,16 +308,17 @@ async def admin_revert_user_report(
             UserReport.status == ReportStatus.FOR_ADMIN,
         )
     ).all()
-    for escalated_report in escalated_reports:
-        escalated_report.status = ReportStatus.DISMISSED
-        session.add(escalated_report)
+
+    for escalated in escalated_reports:
+        escalated.status = ReportStatus.DISMISSED
+        session.add(escalated)
 
     target_user.is_blacklisted = False
+
     session.add(target_user)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
 
 
 @router.post("/admin-reports/users/{user_id}/unban")
@@ -171,13 +327,21 @@ async def admin_unban_user(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Lift a permanent ban and clear any pending temporary blacklist."""
-    _require_admin(current_user)
-    target_user = session.get(User, user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
+    target_user = _load_user(session, user_id)
+
+    # XACML decides first, so the response does not reveal the ban state.
+    enforce(
+        current_user,
+        "unban",
+        "admin_action",
+        admin_target_attrs(target_user.id),
+    )
+
     if not target_user.is_banned:
-        raise HTTPException(status_code=409, detail="User is not permanently banned")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is not permanently banned",
+        )
 
     target_user.is_banned = False
     target_user.is_blacklisted = False
@@ -188,15 +352,20 @@ async def admin_unban_user(
             UserReport.status == ReportStatus.FOR_ADMIN,
         )
     ).all()
-    for active_report in active_reports:
-        active_report.status = ReportStatus.DISMISSED
-        session.add(active_report)
+
+    for active in active_reports:
+        active.status = ReportStatus.DISMISSED
+        session.add(active)
 
     session.add(target_user)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
+
+
+# ---------------------------------------------------------
+# MODERATOR APPLICATIONS
+# ---------------------------------------------------------
 
 
 @router.post("/mod-petitions/{petition_id}/approve")
@@ -205,30 +374,29 @@ async def approve_mod_petition(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Approve a moderator petition and promote its applicant."""
-    _require_admin(current_user)
-    petition = session.get(ModPetition, petition_id)
-    if not petition:
-        raise HTTPException(status_code=404, detail="Moderator petition not found")
-    if petition.Reviewed:
-        raise HTTPException(status_code=409, detail="Moderator petition already reviewed")
+    petition = _load_petition(session, petition_id)
+    applicant = _load_user(session, petition.user_id)
 
-    applicant = session.get(User, petition.user_id)
-    if not applicant:
-        raise HTTPException(status_code=404, detail="Applicant not found")
-    if applicant.role != UserRole.USER:
-        raise HTTPException(
-            status_code=409,
-            detail="Only regular users can be promoted to moderator",
-        )
+    # XACML checks that this is an admin and that the applicant is a
+    # regular user. The "applicant_role" attribute is what enforces that.
+    enforce(
+        current_user,
+        "review",
+        "mod_petition",
+        petition_review_attrs(applicant),
+    )
+
+    _ensure_not_reviewed(petition)
 
     applicant.role = UserRole.MODERATOR
     petition.Reviewed = True
     petition.approved = True
+
+    session.add_all([applicant, petition])
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
+
 
 @router.post("/mod-petitions/{petition_id}/reject")
 async def reject_mod_petition(
@@ -236,20 +404,31 @@ async def reject_mod_petition(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Reject a pending moderator petition."""
-    _require_admin(current_user)
-    petition = session.get(ModPetition, petition_id)
-    if not petition:
-        raise HTTPException(status_code=404, detail="Moderator petition not found")
-    if petition.Reviewed:
-        raise HTTPException(status_code=409, detail="Moderator petition already reviewed")
+    petition = _load_petition(session, petition_id)
+    applicant = _load_user(session, petition.user_id)
+
+    enforce(
+        current_user,
+        "review",
+        "mod_petition",
+        petition_review_attrs(applicant),
+    )
+
+    _ensure_not_reviewed(petition)
 
     petition.Reviewed = True
     petition.approved = False
+
+    session.add(petition)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
+
+
+# ---------------------------------------------------------
+# DELETE USERS AND ITEMS
+# ---------------------------------------------------------
+
 
 @router.post("/admin-reports/users/{user_id}/delete")
 async def admin_delete_user(
@@ -257,17 +436,21 @@ async def admin_delete_user(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Delete a reported user and update associated reports."""
-    _require_admin(current_user)
-    target_user = session.get(User, user_id)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
+    target_user = _load_user(session, user_id)
+
+    # XACML denies admins from deleting their own account.
+    enforce(
+        current_user,
+        "delete_user",
+        "admin_action",
+        admin_target_attrs(target_user.id),
+    )
 
     session.delete(target_user)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
+
 
 @router.post("/admin-reports/items/{report_id}/revert")
 async def admin_revert_item_report(
@@ -275,17 +458,18 @@ async def admin_revert_item_report(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Revert a moderator's temporary blacklist on a reported item."""
-    _require_admin(current_user)
-    report = session.get(ItemReport, report_id)
-    if not report or report.status != ReportStatus.FOR_ADMIN:
-        raise HTTPException(
-            status_code=404, detail="Escalated item report not found"
-        )
+    report = _load_item_report(session, report_id)
+    item = _load_item(session, report.item_id)
+    seller = _load_seller(session, item)
 
-    item = session.get(Item, report.item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Reported item not found")
+    enforce(
+        current_user,
+        "escalated_decide",
+        "report",
+        item_report_attrs(report, item, role_of(seller)),
+    )
+
+    _ensure_escalated_item_report(report)
 
     escalated_reports = session.exec(
         select(ItemReport).where(
@@ -293,16 +477,17 @@ async def admin_revert_item_report(
             ItemReport.status == ReportStatus.FOR_ADMIN,
         )
     ).all()
-    for escalated_report in escalated_reports:
-        escalated_report.status = ReportStatus.DISMISSED
-        session.add(escalated_report)
+
+    for escalated in escalated_reports:
+        escalated.status = ReportStatus.DISMISSED
+        session.add(escalated)
 
     item.is_blacklisted = False
+
     session.add(item)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()
 
 
 @router.post("/admin-reports/items/{item_id}/delete")
@@ -311,14 +496,16 @@ async def admin_delete_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Delete a reported item from the platform."""
-    _require_admin(current_user)
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = _load_item(session, item_id)
+
+    enforce(
+        current_user,
+        "delete",
+        "item",
+        item_attrs(item),
+    )
 
     session.delete(item)
     session.commit()
-    return RedirectResponse(
-        url="/admin/admin-reports", status_code=status.HTTP_302_FOUND
-    )
+
+    return _redirect_admin()

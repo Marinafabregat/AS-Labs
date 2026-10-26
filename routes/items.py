@@ -1,15 +1,33 @@
 import io
+import math
 import re
-import uuid
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from PIL import Image, UnidentifiedImageError
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError
 
 from auth import get_current_active_user, get_current_user_optional
+from authz import (
+    can,
+    enforce,
+    item_attrs,
+    report_create_attrs,
+    role_of,
+    user_pii_attrs,
+)
 from db import get_session
 from models import (
     Category,
@@ -19,42 +37,50 @@ from models import (
     Purchase,
     ReportStatus,
     User,
-    UserRole,
 )
+from security_encryption import decrypt_pii
 from template_context import templates
 
-# All routes inside this document will start with '/items'
+
 router = APIRouter(prefix="/items", tags=["Items"])
 
-# Directory where pictures will be stored
 UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Security rules for file uploads
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_REPORT_REASON_LENGTH = 500
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
-FORMAT_TO_EXT = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+VALID_EXTENSIONS_BY_FORMAT = {
+    "JPEG": {".jpg", ".jpeg"},
+    "PNG": {".png"},
+    "WEBP": {".webp"},
+}
+FORMAT_EXTENSIONS = {
+    "JPEG": ".jpg",
+    "PNG": ".png",
+    "WEBP": ".webp",
+}
+
+SEED_IMAGES = {"keyboard.jpg", "textbook.jpg"}
+
+
+# ---------------------------------------------------------
+# FILE HANDLING HELPERS
+# ---------------------------------------------------------
 
 
 def sanitize_filename(filename: str) -> str:
-    """Conserva el nombre original del archivo limpiándolo de caracteres inseguros
-
-    (Path Traversal) y evita colisiones añadiendo sufijos numéricos.
-    """
+    """Build a safe filename and avoid overwriting existing files."""
     path = Path(filename)
     stem = path.stem
     ext = path.suffix.lower()
 
-    # Reemplazar espacios y caracteres no alfanuméricos por guiones bajos
-    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", stem)
-    if not safe_stem:
-        safe_stem = "upload"
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", stem) or "upload"
 
     safe_name = f"{safe_stem}{ext}"
     destination_path = UPLOAD_DIR / safe_name
 
-    # Evitar sobrescribir fotos existentes con el mismo nombre
     counter = 1
     while destination_path.exists():
         safe_name = f"{safe_stem}_{counter}{ext}"
@@ -64,25 +90,251 @@ def sanitize_filename(filename: str) -> str:
     return safe_name
 
 
-# --- 1. RUTAS ESTÁTICAS ---
+def remove_uploaded_image(filename: Optional[str]) -> None:
+    """Delete an uploaded image. Seed images are never deleted."""
+    if not filename or filename in SEED_IMAGES:
+        return
+
+    # Prevent a crafted filename from escaping the uploads directory.
+    safe_path = (UPLOAD_DIR / filename).resolve()
+    upload_root = UPLOAD_DIR.resolve()
+
+    if safe_path.parent != upload_root:
+        return
+
+    if safe_path.is_file():
+        safe_path.unlink()
 
 
-# Publish item page (GET)
+def validate_and_save_image(contents: bytes, filename: str) -> str:
+    """Check the real image content, re-encode it and store it under a safe name."""
+    file_ext = Path(filename).suffix.lower()
+
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise ValueError(
+            "Invalid file extension. Only JPG, PNG, and WEBP images are allowed."
+        )
+
+    if not contents:
+        raise ValueError("The uploaded image is empty.")
+
+    if len(contents) > MAX_FILE_SIZE:
+        raise ValueError("File size exceeds the 5MB limit.")
+
+    try:
+        with Image.open(io.BytesIO(contents)) as img:
+            img.verify()
+
+        # verify() invalidates the image object, so it must be opened again.
+        with Image.open(io.BytesIO(contents)) as img:
+            real_format = img.format.upper() if img.format else ""
+
+            if real_format not in ALLOWED_FORMATS:
+                raise ValueError(
+                    "The uploaded file is not a valid or supported image."
+                )
+
+            # The extension must match the real format.
+            if file_ext not in VALID_EXTENSIONS_BY_FORMAT[real_format]:
+                raise ValueError(
+                    "The image extension does not match its actual format."
+                )
+
+            # Re-encoding drops any extra payload hidden in the original file.
+            output = io.BytesIO()
+            img.save(output, format=real_format)
+            image_contents = output.getvalue()
+
+    except ValueError:
+        raise
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError(
+            "The uploaded file is not a valid or supported image."
+        ) from exc
+    except Exception as exc:
+        raise ValueError(
+            "The uploaded file is not a valid or supported image."
+        ) from exc
+
+    original_stem = Path(filename).stem
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", original_stem) or "upload"
+    extension = FORMAT_EXTENSIONS[real_format]
+
+    safe_filename = sanitize_filename(f"{safe_stem}{extension}")
+    file_path = UPLOAD_DIR / safe_filename
+
+    try:
+        file_path.write_bytes(image_contents)
+    except OSError as exc:
+        raise ValueError("The image could not be saved.") from exc
+
+    return safe_filename
+
+
+async def read_upload_limited(image: UploadFile) -> bytes:
+    """Read an upload in chunks and stop as soon as it exceeds the size limit."""
+    chunks = []
+    total_size = 0
+
+    while True:
+        chunk = await image.read(64 * 1024)
+
+        if not chunk:
+            break
+
+        total_size += len(chunk)
+
+        if total_size > MAX_FILE_SIZE:
+            raise ValueError("File size exceeds the 5MB limit.")
+
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
+def render_item_form_error(
+    request: Request,
+    template_name: str,
+    context: dict,
+    message: str,
+):
+    """Re-render an item form with a validation error."""
+    context["error"] = message
+
+    return templates.TemplateResponse(
+        request=request,
+        name=template_name,
+        context=context,
+        status_code=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def validate_item_fields(
+    title: str,
+    description: str,
+    price: float,
+    category_id: int,
+    session: Session,
+) -> None:
+    """Validate the business fields of an item."""
+    if not title.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The item title cannot be empty.",
+        )
+
+    if not description.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The item description cannot be empty.",
+        )
+
+    if not math.isfinite(price) or price <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The price must be a positive, finite number.",
+        )
+
+    if session.get(Category, category_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The selected category does not exist.",
+        )
+
+
+def require_private_items_access(current_user: User) -> None:
+    """Ask XACML whether the user may see their own private item lists."""
+    enforce(
+        current_user,
+        "read",
+        "user_pii",
+        user_pii_attrs(current_user),
+    )
+
+
+def load_item_or_404(session: Session, item_id: int) -> Item:
+    """Load an item or raise 404. Authorization is checked by the caller."""
+    item = session.get(Item, item_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
+
+    return item
+
+
+# ---------------------------------------------------------
+# IMAGES (served through XACML)
+# ---------------------------------------------------------
+
+
+@router.get("/images/{filename}")
+async def item_image(
+    filename: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    session: Session = Depends(get_session),
+):
+    """
+    Serve an item image only if XACML allows the viewer to read the item
+    that uses it. Hidden items return 404, so their images cannot be
+    fetched by guessing the URL.
+    """
+    safe_name = Path(filename).name
+
+    item = session.exec(
+        select(Item).where(Item.image_filename == safe_name)
+    ).first()
+
+    if item is None or not can(
+        current_user,
+        "read",
+        "item",
+        item_attrs(item),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        )
+
+    path = (UPLOAD_DIR / safe_name).resolve()
+
+    if path.parent != UPLOAD_DIR.resolve() or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        )
+
+    return FileResponse(path)
+
+
+# ---------------------------------------------------------
+# CREATE ITEMS
+# ---------------------------------------------------------
+
+
 @router.get("/create", response_class=HTMLResponse)
 async def create_item_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    # XACML decides whether the user may create items.
+    enforce(current_user, "create", "item", {})
+
     categories = session.exec(select(Category)).all()
+
     return templates.TemplateResponse(
-        request,
-        "create_item.html",
-        {"user": current_user, "categories": categories},
+        request=request,
+        name="create_item.html",
+        context={
+            "user": current_user,
+            "categories": categories,
+        },
     )
 
 
-# Process item creation with Secure Upload Validation (POST)
 @router.post("/create")
 async def create_item(
     request: Request,
@@ -94,163 +346,200 @@ async def create_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    # Authorization happens before any file is read or stored.
+    enforce(current_user, "create", "item", {})
+
     categories = session.exec(select(Category)).all()
 
     if not image or not image.filename:
-        return templates.TemplateResponse(
+        return render_item_form_error(
             request,
             "create_item.html",
-            {
-                "user": current_user,
-                "categories": categories,
-                "error": "An image is required to publish an item.",
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    file_ext = Path(image.filename).suffix.lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        return templates.TemplateResponse(
-            request,
-            "create_item.html",
-            {
-                "user": current_user,
-                "categories": categories,
-                "error": "Invalid file extension. Only JPG, PNG, and WEBP images are allowed.",
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    contents = await image.read()
-    if len(contents) > MAX_FILE_SIZE:
-        return templates.TemplateResponse(
-            request,
-            "create_item.html",
-            {
-                "user": current_user,
-                "categories": categories,
-                "error": "File size exceeds the 5MB limit.",
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
+            {"user": current_user, "categories": categories},
+            "An image is required to publish an item.",
         )
 
     try:
-        img = Image.open(io.BytesIO(contents))
-        img.verify()
-
-        img = Image.open(io.BytesIO(contents))
-        real_format = img.format.upper() if img.format else ""
-
-        if real_format not in ALLOWED_FORMATS:
-            raise ValueError("Unsupported format")
-
-    except Exception:
-        return templates.TemplateResponse(
-            request,
-            "create_item.html",
-            {
-                "user": current_user,
-                "categories": categories,
-                "error": "The uploaded file is not a valid or supported image.",
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
+        validate_item_fields(
+            title,
+            description,
+            price,
+            category_id,
+            session,
         )
 
-    # Sanitizar y conservar el nombre original del archivo
-    image_filename = sanitize_filename(image.filename)
-    file_path = UPLOAD_DIR / image_filename
-    img.save(file_path)
+        contents = await read_upload_limited(image)
+        image_filename = validate_and_save_image(
+            contents,
+            image.filename,
+        )
+
+    except ValueError as exc:
+        return render_item_form_error(
+            request,
+            "create_item.html",
+            {"user": current_user, "categories": categories},
+            str(exc),
+        )
+    except HTTPException as exc:
+        return render_item_form_error(
+            request,
+            "create_item.html",
+            {"user": current_user, "categories": categories},
+            str(exc.detail),
+        )
+    finally:
+        await image.close()
 
     new_item = Item(
-        title=title,
-        description=description,
+        title=title.strip(),
+        description=description.strip(),
         price=price,
         category_id=category_id,
         seller_id=current_user.id,
         image_filename=image_filename,
     )
 
-    session.add(new_item)
-    session.commit()
-    session.refresh(new_item)
+    try:
+        session.add(new_item)
+        session.commit()
+        session.refresh(new_item)
+    except Exception:
+        session.rollback()
+        remove_uploaded_image(image_filename)
+        raise
 
     return RedirectResponse(
-        url=f"/items/{new_item.id}", status_code=status.HTTP_302_FOUND
+        url=f"/items/{new_item.id}",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
-# See Liked Items
+# ---------------------------------------------------------
+# LIKED ITEMS
+# ---------------------------------------------------------
+
+
 @router.get("/liked", response_class=HTMLResponse)
 async def liked_items_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    require_private_items_access(current_user)
+
     likes = session.exec(
         select(Like).where(Like.user_id == current_user.id)
     ).all()
 
     liked_item_ids = [like.item_id for like in likes]
     items = []
+
     if liked_item_ids:
-        items = session.exec(
+        candidate_items = session.exec(
             select(Item).where(Item.id.in_(liked_item_ids))
         ).all()
 
+        # XACML filters out items the user may no longer see.
+        items = [
+            item
+            for item in candidate_items
+            if can(current_user, "read", "item", item_attrs(item))
+        ]
+
     return templates.TemplateResponse(
-        request,
-        "liked_items.html",
-        {"user": current_user, "items": items},
+        request=request,
+        name="liked_items.html",
+        context={
+            "user": current_user,
+            "items": items,
+        },
     )
 
 
-# See Purchased Items
+# ---------------------------------------------------------
+# PURCHASED ITEMS
+# ---------------------------------------------------------
+
+
 @router.get("/purchased", response_class=HTMLResponse)
 async def get_purchased_items(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
+    require_private_items_access(current_user)
+
     purchased_item_ids = session.exec(
-        select(Purchase.item_id).where(Purchase.buyer_id == current_user.id)
+        select(Purchase.item_id).where(
+            Purchase.buyer_id == current_user.id
+        )
     ).all()
 
     items = []
+
     if purchased_item_ids:
-        items = session.exec(
+        candidate_items = session.exec(
             select(Item).where(Item.id.in_(purchased_item_ids))
         ).all()
 
+        items = [
+            item
+            for item in candidate_items
+            if can(current_user, "read", "item", item_attrs(item))
+        ]
+
     return templates.TemplateResponse(
-        request,
-        "purchased.html",
-        {"user": current_user, "items": items},
+        request=request,
+        name="purchased.html",
+        context={
+            "user": current_user,
+            "items": items,
+        },
     )
 
 
-# See My Published Items
+# ---------------------------------------------------------
+# MY ITEMS
+# ---------------------------------------------------------
+
+
 @router.get("/my-items", response_class=HTMLResponse)
 async def my_items_page(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    items = session.exec(
+    require_private_items_access(current_user)
+
+    candidate_items = session.exec(
         select(Item).where(Item.seller_id == current_user.id)
     ).all()
 
+    # Hidden items disappear from the seller's list because the read
+    # policy hides them from non-staff. This is intentional and must be
+    # kept consistent with the policy.
+    items = [
+        item
+        for item in candidate_items
+        if can(current_user, "read", "item", item_attrs(item))
+    ]
+
     item_ids = [item.id for item in items if item.id is not None]
     sold_item_ids = set()
+
     if item_ids:
         purchases = session.exec(
-            select(Purchase.item_id).where(Purchase.item_id.in_(item_ids))
+            select(Purchase.item_id).where(
+                Purchase.item_id.in_(item_ids)
+            )
         ).all()
         sold_item_ids = set(purchases)
 
     return templates.TemplateResponse(
-        request,
-        "my_items.html",
-        {
+        request=request,
+        name="my_items.html",
+        context={
             "user": current_user,
             "items": items,
             "sold_item_ids": sold_item_ids,
@@ -258,7 +547,9 @@ async def my_items_page(
     )
 
 
-# --- 2. RUTAS DINÁMICAS (EDICIÓN, BORRADO, REPORTE Y DETALLES) ---
+# ---------------------------------------------------------
+# EDIT ITEMS
+# ---------------------------------------------------------
 
 
 @router.get("/{item_id}/edit", response_class=HTMLResponse)
@@ -268,33 +559,34 @@ async def edit_item_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = load_item_or_404(session, item_id)
 
-    if item.seller_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to edit this item"
-        )
+    # XACML decides whether the user may update this item.
+    enforce(current_user, "update", "item", item_attrs(item))
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
+
     if already_bought:
         raise HTTPException(
-            status_code=400,
-            detail="Cannot edit a product that has already been sold",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot edit a product that has already been sold.",
         )
 
     categories = session.exec(select(Category)).all()
+
     return templates.TemplateResponse(
-        request,
-        "edit_item.html",
-        {"user": current_user, "item": item, "categories": categories},
+        request=request,
+        name="edit_item.html",
+        context={
+            "user": current_user,
+            "item": item,
+            "categories": categories,
+        },
     )
 
 
-# Procesar edición de artículo (POST)
 @router.post("/{item_id}/edit")
 async def edit_item(
     request: Request,
@@ -307,153 +599,153 @@ async def edit_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = load_item_or_404(session, item_id)
 
-    if item.seller_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to edit this item"
-        )
+    # Authorization is checked again on POST, not only on the GET form.
+    enforce(current_user, "update", "item", item_attrs(item))
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
+
     if already_bought:
         raise HTTPException(
-            status_code=400,
-            detail="Cannot edit a product that has already been sold",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot edit a product that has already been sold.",
         )
 
     categories = session.exec(select(Category)).all()
 
+    try:
+        validate_item_fields(
+            title,
+            description,
+            price,
+            category_id,
+            session,
+        )
+    except HTTPException as exc:
+        return render_item_form_error(
+            request,
+            "edit_item.html",
+            {
+                "user": current_user,
+                "item": item,
+                "categories": categories,
+            },
+            str(exc.detail),
+        )
+
+    new_filename = None
+
     if image and image.filename:
-        file_ext = Path(image.filename).suffix.lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            return templates.TemplateResponse(
-                request,
-                "edit_item.html",
-                {
-                    "user": current_user,
-                    "item": item,
-                    "categories": categories,
-                    "error": "Invalid file extension. Only JPG, PNG, and WEBP images are allowed.",
-                },
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-
-        contents = await image.read()
-        if len(contents) > MAX_FILE_SIZE:
-            return templates.TemplateResponse(
-                request,
-                "edit_item.html",
-                {
-                    "user": current_user,
-                    "item": item,
-                    "categories": categories,
-                    "error": "File size exceeds the 5MB limit.",
-                },
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            img = Image.open(io.BytesIO(contents))
-            img.verify()
-
-            img = Image.open(io.BytesIO(contents))
-            real_format = img.format.upper() if img.format else ""
-
-            if real_format not in ALLOWED_FORMATS:
-                raise ValueError("Unsupported format")
-
-        except Exception:
-            return templates.TemplateResponse(
+            contents = await read_upload_limited(image)
+            new_filename = validate_and_save_image(
+                contents,
+                image.filename,
+            )
+        except ValueError as exc:
+            return render_item_form_error(
                 request,
                 "edit_item.html",
                 {
                     "user": current_user,
                     "item": item,
                     "categories": categories,
-                    "error": "The uploaded file is not a valid or supported image.",
                 },
-                status_code=status.HTTP_400_BAD_REQUEST,
+                str(exc),
             )
+        finally:
+            await image.close()
 
-        # Borrar foto anterior solo si no pertenece a los datos semilla iniciales
-        if item.image_filename and item.image_filename not in [
-            "keyboard.jpg",
-            "textbook.jpg",
-        ]:
-            old_file_path = UPLOAD_DIR / item.image_filename
-            if old_file_path.exists() and old_file_path.is_file():
-                old_file_path.unlink()
+    old_filename = item.image_filename
 
-        new_filename = sanitize_filename(image.filename)
-        new_file_path = UPLOAD_DIR / new_filename
-        img.save(new_file_path)
-        item.image_filename = new_filename
-
-    item.title = title
-    item.description = description
+    item.title = title.strip()
+    item.description = description.strip()
     item.price = price
     item.category_id = category_id
 
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    if new_filename:
+        item.image_filename = new_filename
+
+    try:
+        session.add(item)
+        session.commit()
+        session.refresh(item)
+    except Exception:
+        session.rollback()
+
+        if new_filename:
+            remove_uploaded_image(new_filename)
+
+        raise
+
+    # The old image is removed only after the database commit succeeds.
+    if new_filename and old_filename != new_filename:
+        remove_uploaded_image(old_filename)
 
     return RedirectResponse(
-        url=f"/items/{item.id}", status_code=status.HTTP_302_FOUND
+        url=f"/items/{item.id}",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
-# Eliminar artículo (POST)
+# ---------------------------------------------------------
+# DELETE ITEMS
+# ---------------------------------------------------------
+
+
 @router.post("/{item_id}/delete")
 async def delete_item(
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = load_item_or_404(session, item_id)
 
-    if item.seller_id != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="You are not authorized to delete this item",
-        )
+    # XACML decides whether the user may delete this item.
+    enforce(current_user, "delete", "item", item_attrs(item))
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
+
     if already_bought:
         raise HTTPException(
-            status_code=400,
-            detail="Cannot delete a product that has already been sold",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a product that has already been sold.",
         )
 
-    likes = session.exec(select(Like).where(Like.item_id == item_id)).all()
-    for like in likes:
-        session.delete(like)
+    likes = session.exec(
+        select(Like).where(Like.item_id == item_id)
+    ).all()
 
-    if item.image_filename and item.image_filename not in [
-        "keyboard.jpg",
-        "textbook.jpg",
-    ]:
-        file_path = UPLOAD_DIR / item.image_filename
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink()
+    image_filename = item.image_filename
 
-    session.delete(item)
-    session.commit()
+    try:
+        for like in likes:
+            session.delete(like)
+
+        session.delete(item)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    remove_uploaded_image(image_filename)
 
     return RedirectResponse(
-        url="/items/my-items", status_code=status.HTTP_302_FOUND
+        url="/items/my-items",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
-# Report Item (POST)
+# ---------------------------------------------------------
+# REPORT ITEMS
+# ---------------------------------------------------------
+
+
 @router.post("/{item_id}/report")
 async def report_item(
     item_id: int,
@@ -461,42 +753,43 @@ async def report_item(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = load_item_or_404(session, item_id)
 
-    if item.seller_id == current_user.id:
+    seller = session.get(User, item.seller_id)
+
+    if seller is None:
         raise HTTPException(
-            status_code=400, detail="You cannot report your own listing"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seller not found",
         )
 
-    if current_user.role == UserRole.ADMIN:
-        if item.image_filename and item.image_filename not in [
-            "keyboard.jpg",
-            "textbook.jpg",
-        ]:
-            file_path = UPLOAD_DIR / item.image_filename
-            if file_path.exists() and file_path.is_file():
-                file_path.unlink()
-        session.delete(item)
-        session.commit()
-        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    # Authorize before validating the reason, so the response does not
+    # reveal anything about the item's state.
+    enforce(
+        current_user,
+        "create",
+        "report",
+        report_create_attrs(item.seller_id, role_of(seller)),
+    )
 
+    clean_reason = reason.strip()
+
+    if len(clean_reason) > MAX_REPORT_REASON_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The report reason cannot exceed 500 characters.",
+        )
+
+    # Item reports always start as PENDING. Escalation rules for item
+    # reports are not defined yet (see the open decisions below).
     new_report = ItemReport(
         item_id=item.id,
         reporter_id=current_user.id,
-        reason=reason.strip() or "No reason provided",
-        status=(
-            ReportStatus.FOR_ADMIN
-            if current_user.role == UserRole.MODERATOR
-            else ReportStatus.PENDING
-        ),
+        reason=clean_reason or "No reason provided",
+        status=ReportStatus.PENDING,
     )
-    session.add(new_report)
 
-    if new_report.status == ReportStatus.FOR_ADMIN:
-        item.is_blacklisted = True
-        session.add(item)
+    session.add(new_report)
     session.commit()
 
     return RedirectResponse(
@@ -505,7 +798,11 @@ async def report_item(
     )
 
 
-# Item Details (GET)
+# ---------------------------------------------------------
+# ITEM DETAIL
+# ---------------------------------------------------------
+
+
 @router.get("/{item_id}", response_class=HTMLResponse)
 async def item_detail(
     request: Request,
@@ -513,39 +810,49 @@ async def item_detail(
     session: Session = Depends(get_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    item = session.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    item = load_item_or_404(session, item_id)
+
+    # Hidden items return 404 to viewers without permission, so the
+    # response does not reveal that the item exists but is hidden.
+    if not can(current_user, "read", "item", item_attrs(item)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
 
     is_liked = False
     is_owner = False
     is_purchased = False
 
     if current_user:
-        if item.seller_id == current_user.id:
-            is_owner = True
+        # These flags only change what the UI shows. They grant nothing.
+        is_owner = item.seller_id == current_user.id
 
         existing_like = session.exec(
             select(Like).where(
-                Like.user_id == current_user.id, Like.item_id == item.id
+                Like.user_id == current_user.id,
+                Like.item_id == item.id,
             )
         ).first()
+
         is_liked = existing_like is not None
 
-        existing_purchase = session.exec(
-            select(Purchase).where(Purchase.item_id == item.id)
-        ).first()
-        is_purchased = existing_purchase is not None
+    existing_purchase = session.exec(
+        select(Purchase).where(Purchase.item_id == item.id)
+    ).first()
+
+    is_purchased = existing_purchase is not None
 
     missing_address_error = (
         request.query_params.get("missing_address") == "true"
     )
     reported_success = request.query_params.get("reported") == "true"
+    bought_success = request.query_params.get("bought") == "true"
 
     return templates.TemplateResponse(
-        request,
-        "item_detail.html",
-        {
+        request=request,
+        name="item_detail.html",
+        context={
             "user": current_user,
             "item": item,
             "seller": session.get(User, item.seller_id),
@@ -554,79 +861,106 @@ async def item_detail(
             "is_purchased": is_purchased,
             "missing_address_error": missing_address_error,
             "reported_success": reported_success,
+            "bought_success": bought_success,
         },
     )
 
 
-# Like or Dislike Item (POST)
+# ---------------------------------------------------------
+# LIKE / UNLIKE
+# ---------------------------------------------------------
+
+
 @router.post("/{item_id}/like")
 async def toggle_like(
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item or item.is_blacklisted:
-        raise HTTPException(
-            status_code=400, detail="Item is not available for interaction"
-        )
+    item = load_item_or_404(session, item_id)
+
+    # XACML decides whether the user may like this item.
+    enforce(current_user, "like", "item", item_attrs(item))
 
     existing_like = session.exec(
         select(Like).where(
-            Like.user_id == current_user.id, Like.item_id == item_id
+            Like.user_id == current_user.id,
+            Like.item_id == item_id,
         )
     ).first()
 
     if existing_like:
         session.delete(existing_like)
     else:
-        new_like = Like(user_id=current_user.id, item_id=item_id)
-        session.add(new_like)
+        session.add(
+            Like(
+                user_id=current_user.id,
+                item_id=item_id,
+            )
+        )
 
     session.commit()
+
     return RedirectResponse(
-        url=f"/items/{item_id}", status_code=status.HTTP_302_FOUND
+        url=f"/items/{item_id}",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
-# Buy Item (POST)
+# ---------------------------------------------------------
+# BUY ITEMS
+# ---------------------------------------------------------
+
+
 @router.post("/{item_id}/buy")
 async def buy_item(
-    request: Request,
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    item = session.get(Item, item_id)
-    if not item or item.is_blacklisted:
-        raise HTTPException(status_code=404, detail="Item not available")
+    item = load_item_or_404(session, item_id)
 
-    if item.seller_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Cannot buy own product")
+    # XACML decides whether the user may buy this item. This also covers
+    # hidden items and the seller buying their own item.
+    enforce(current_user, "buy", "item", item_attrs(item))
 
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
+
     if already_bought:
         raise HTTPException(
-            status_code=400, detail="This product has already been sold"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This product has already been sold.",
         )
 
-    user_address = getattr(current_user, "address", None) or getattr(
-        current_user, "shipping_address", None
-    )
-    if not user_address or not str(user_address).strip():
+    # Business rule: a delivery address is required before buying.
+    # Addresses are stored encrypted, so decrypt before checking.
+    delivery_address = decrypt_pii(current_user.delivery_address_line1)
+
+    if not delivery_address or not delivery_address.strip():
         return RedirectResponse(
             url=f"/items/{item_id}?missing_address=true",
             status_code=status.HTTP_302_FOUND,
         )
 
     purchase = Purchase(
-        buyer_id=current_user.id, item_id=item.id, price_paid=item.price
+        buyer_id=current_user.id,
+        item_id=item.id,
+        price_paid=item.price,
     )
-    session.add(purchase)
-    session.commit()
+
+    try:
+        session.add(purchase)
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This product has already been sold.",
+        )
 
     return RedirectResponse(
-        url=f"/items/{item_id}?bought=true", status_code=status.HTTP_302_FOUND
+        url=f"/items/{item_id}?bought=true",
+        status_code=status.HTTP_302_FOUND,
     )

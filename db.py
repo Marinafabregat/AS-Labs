@@ -1,4 +1,9 @@
-from sqlmodel import SQLModel, create_engine, Session, select
+import os
+from pathlib import Path
+
+from sqlalchemy import inspect, text
+from sqlmodel import Session, SQLModel, create_engine, select
+
 from models import (
     Category,
     Item,
@@ -10,25 +15,27 @@ from models import (
     User,
     UserReport,
 )
-from sqlalchemy import inspect, text
-import os
 
-# Define our SQLite
-if os.getenv("DATABASE_URL"):
-    sqlite_url = os.getenv("DATABASE_URL")
-else:
-    # Automatically check if we are inside Docker (where /app typically exists)
-    if os.path.exists("/app"):
-        sqlite_file_name = "/app/database.db"
-    else:
-        sqlite_file_name = "database.db"  # Local fallback
-    sqlite_url = f"sqlite:///{sqlite_file_name}"
-        
+PROJECT_ROOT = Path(__file__).resolve().parent
+IN_DOCKER = os.path.exists("/app")
+LOCAL_DB_FILE = PROJECT_ROOT / "database.db"
+
+
+def _resolve_sqlite_url() -> str:
+    env_url = os.getenv("DATABASE_URL")
+    # Una ruta /app/... solo tiene sentido dentro del contenedor Docker
+    if env_url and (IN_DOCKER or not env_url.startswith("sqlite:////app/")):
+        return env_url
+    db_file = Path("/app/database.db") if IN_DOCKER else LOCAL_DB_FILE
+    return f"sqlite:///{db_file}"
+
+
+sqlite_url = _resolve_sqlite_url()
 connect_args = {"check_same_thread": False}
-
 
 # Create the Engine
 engine = create_engine(sqlite_url, echo=False, connect_args=connect_args)
+
 
 def init_db():
     """
