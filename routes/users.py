@@ -17,6 +17,7 @@ from db import get_session
 from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
 from template_context import templates
+import re
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -37,6 +38,26 @@ async def register_user(
     session: Session = Depends(get_session),
 ):
     """Handle user registration without PII delivery data."""
+    if (
+      len(password) < 8
+      or not re.search(r"[A-Z]", password)
+      or not re.search(r"[0-9]", password)
+      or not re.search(r"[\W_]", password)
+    ):
+        return templates.TemplateResponse(
+            request,
+            "users/register.html",
+            {
+                "error": (
+                    "Password must be at least 8 characters long and include an"
+                    " uppercase letter, a number, and a special character."
+                ),
+                "username": username,
+                "email": email,
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     existing_user = session.exec(
         select(User).where((User.username == username) | (User.email == email))
     ).first()
