@@ -9,7 +9,6 @@ from cryptography.exceptions import InvalidTag
 from PIL import Image
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from auth import get_current_active_user, get_current_user_optional
@@ -17,9 +16,10 @@ from db import get_session
 from models import Category, Item, ItemReport, Like, Purchase, User, UserRole
 from image_storage import save_image, load_image, delete_image, is_valid_name, media_type
 
+from template_context import templates
+
 # All routes inside this document will start with '/items'
 router = APIRouter(prefix="/items", tags=["Items"])
-templates = Jinja2Templates(directory="templates")
 
 # Security rules for file uploads
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
@@ -438,15 +438,33 @@ async def report_item(
             status_code=400, detail="You cannot report your own listing"
         )
 
+    if current_user.role == UserRole.ADMIN:
+        if item.image_filename and item.image_filename not in [
+            "keyboard.jpg",
+            "textbook.jpg",
+        ]:
+            file_path = UPLOAD_DIR / item.image_filename
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink()
+        session.delete(item)
+        session.commit()
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+
     new_report = ItemReport(
         item_id=item.id,
         reporter_id=current_user.id,
         reason=reason.strip() or "No reason provided",
+        status=(
+            ReportStatus.FOR_ADMIN
+            if current_user.role == UserRole.MODERATOR
+            else ReportStatus.PENDING
+        ),
     )
     session.add(new_report)
 
-    item.is_blacklisted = True
-    session.add(item)
+    if new_report.status == ReportStatus.FOR_ADMIN:
+        item.is_blacklisted = True
+        session.add(item)
     session.commit()
 
     return RedirectResponse(

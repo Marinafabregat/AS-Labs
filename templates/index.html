@@ -129,7 +129,7 @@
         </div>
       {% endif %}
 
-      {% if user.role.value|lower == 'admin' or user.role == 'admin' %}
+      {% if user.role.value|lower == 'admin' or user.role == 'admin' or user.role.value == 'ADMIN' %}
         <div class="bg-purple-50 border border-purple-200 p-4 rounded-xl text-purple-900 mt-4 text-xs">
           <p class="font-bold mb-1">👑 Administrator Panel (Level 3 Access)</p>
           <p>Full access permissions: Elevate users, review moderator petitions, and delete reported posts.</p>

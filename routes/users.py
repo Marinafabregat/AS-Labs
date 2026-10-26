@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
 from auth import (
@@ -13,11 +13,12 @@ from auth import (
     verify_password,
 )
 from db import get_session
-from models import ModPetition, User, UserRole
+from models import Item, ItemReport, ModPetition, ReportStatus, User, UserReport, UserRole
 from security_encryption import encrypt_pii, decrypt_pii
+from template_context import templates
+import re
 
 router = APIRouter(prefix="/users", tags=["Users"])
-templates = Jinja2Templates(directory="templates")
 
 
 # REGISTER
@@ -36,6 +37,26 @@ async def register_user(
     session: Session = Depends(get_session),
 ):
     """Handle user registration without PII delivery data."""
+    if (
+      len(password) < 8
+      or not re.search(r"[A-Z]", password)
+      or not re.search(r"[0-9]", password)
+      or not re.search(r"[\W_]", password)
+    ):
+        return templates.TemplateResponse(
+            request,
+            "users/register.html",
+            {
+                "error": (
+                    "Password must be at least 8 characters long and include an"
+                    " uppercase letter, a number, and a special character."
+                ),
+                "username": username,
+                "email": email,
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     existing_user = session.exec(
         select(User).where((User.username == username) | (User.email == email))
     ).first()
@@ -95,11 +116,19 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    if user.is_banned:
+        return templates.TemplateResponse(
+            request,
+            "users/login.html",
+            {"error": "Account permanently banned. Access denied."},
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     if user.is_blacklisted:
         return templates.TemplateResponse(
             request,
             "users/login.html",
-            {"error": "Account is blacklisted. Access denied."},
+            {"error": "Account temporarily suspended pending admin review."},
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
@@ -122,7 +151,7 @@ async def profile_page(
     current_user: User = Depends(get_current_active_user),
 ):
     """Display profile page with decrypted PII delivery info for the user."""
-    # Decrypt sensitive fields for template rendering view
+    #decrypt sensitive fields
     user_data = {
         **current_user.model_dump(),
         "delivery_address_line1": decrypt_pii(current_user.delivery_address_line1),
@@ -178,6 +207,25 @@ async def update_profile(
     current_user.phone_number = encrypt_pii(phone_number)
 
     if password and password.strip():
+        if (
+              len(password) < 8
+              or not re.search(r"[A-Z]", password)
+              or not re.search(r"[0-9]", password)
+              or not re.search(r"[\W_]", password)
+            ):
+                return templates.TemplateResponse(
+                    request,
+                    "users/profile.html",
+                    {
+                        "error": (
+                            "Password must be at least 8 characters long and include an"
+                            " uppercase letter, a number, and a special character."
+                        ),
+                        "user": current_user,
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+        
         current_user.hashed_password = hash_password(password)
 
     session.add(current_user)
@@ -289,3 +337,76 @@ async def delete_account(
     response = RedirectResponse(url="/users/login?deleted=true", status_code=status.HTTP_302_FOUND)
     response.delete_cookie("access_token")
     return response
+
+# PUBLIC PROFILE & USER REPORTS
+
+@router.get("/{user_id}", response_class=HTMLResponse)
+async def public_profile(
+    request: Request,
+    user_id: UUID,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    session: Session = Depends(get_session),
+):
+    """Show public account details and active listings without exposing private data."""
+    profile_user = session.get(User, user_id)
+    if not profile_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    items = session.exec(
+        select(Item).where(
+            Item.seller_id == profile_user.id,
+            Item.is_blacklisted.is_(False),
+        )
+    ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "users/public_profile.html",
+        {
+            "user": current_user,
+            "profile_user": profile_user,
+            "items": items,
+            "reported_success": request.query_params.get("reported") == "true",
+        },
+    )
+
+
+@router.post("/{user_id}/report")
+async def report_user(
+    user_id: UUID,
+    reason: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    """Save a report about another user for moderator review."""
+    target_user = session.get(User, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target_user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot report yourself")
+
+    report_status = (
+        ReportStatus.FOR_ADMIN
+        if current_user.role != UserRole.USER
+        else ReportStatus.PENDING
+    )
+
+    user_report = UserReport(
+        target_user_id=target_user.id,
+        reporter_id=current_user.id,
+        reason=reason.strip() or "No reason provided",
+        status=report_status,
+    )
+
+    if report_status == ReportStatus.FOR_ADMIN:
+        target_user.is_blacklisted = True
+        session.add(target_user)
+
+    session.add(user_report)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/users/{target_user.id}?reported=true",
+        status_code=status.HTTP_302_FOUND,
+    )

@@ -1,13 +1,28 @@
+import os
+
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
-from auth import get_current_user, get_session
+from auth import get_current_active_user, get_session
 from models import User
 from oauth import oauth
+from security_encryption import encrypt_secret
+from template_context import templates
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-templates = Jinja2Templates(directory="templates")
+
+
+def _blacklist_denied(request: Request, user: User):
+    if user.is_banned:
+        message = "Account permanently banned. Access denied."
+    else:
+        message = "Account temporarily suspended pending admin review."
+    return templates.TemplateResponse(
+        request,
+        "auth/login.html",
+        {"error": message},
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -19,7 +34,7 @@ async def login_page(request: Request):
 @router.get("/google")
 async def google_login(request: Request):
     """Redirect to Google OAuth."""
-    redirect_uri = request.url_for("google_callback")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or str(request.url_for("google_callback"))
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -55,9 +70,11 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     user = session.exec(select(User).where(User.oauth_id == oauth_id)).first()
 
     if user:
-        # Update tokens
-        user.oauth_access_token = token.get("access_token")
-        user.oauth_refresh_token = token.get("refresh_token")
+        if user.is_blacklisted or user.is_banned:
+            return _blacklist_denied(request, user)
+        # Update tokens (encrypted at rest)
+        user.oauth_access_token = encrypt_secret(token.get("access_token"))
+        user.oauth_refresh_token = encrypt_secret(token.get("refresh_token"))
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -68,12 +85,14 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     existing_user = session.exec(select(User).where(User.email == email)).first()
 
     if existing_user:
+        if existing_user.is_blacklisted or existing_user.is_banned:
+            return _blacklist_denied(request, existing_user)
         # Store OAuth info in session for linking confirmation
         request.session["pending_oauth_link"] = {
             "email": email,
             "oauth_id": oauth_id,
-            "access_token": token.get("access_token"),
-            "refresh_token": token.get("refresh_token"),
+            "access_token": encrypt_secret(token.get("access_token")),
+            "refresh_token": encrypt_secret(token.get("refresh_token")),
             "name": userinfo.get("name", ""),
             "picture": userinfo.get("picture", ""),
         }
@@ -93,8 +112,8 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
         hashed_password=None,
         oauth_provider="google",
         oauth_id=oauth_id,
-        oauth_access_token=token.get("access_token"),
-        oauth_refresh_token=token.get("refresh_token"),
+        oauth_access_token=encrypt_secret(token.get("access_token")),
+        oauth_refresh_token=encrypt_secret(token.get("refresh_token")),
     )
     session.add(user)
     session.commit()
@@ -113,6 +132,13 @@ async def link_account_page(request: Request):
     return templates.TemplateResponse(request, "auth/link.html", {"oauth_data": oauth_data})
 
 
+@router.get("/cancel")
+async def cancel_link(request: Request):
+    """Discard a pending Google account link and return to login."""
+    request.session.pop("pending_oauth_link", None)
+    return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
+
+
 @router.post("/link")
 async def link_account_confirm(request: Request, session: Session = Depends(get_session)):
     """Confirm linking Google account to existing user."""
@@ -123,9 +149,14 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
     email = oauth_data["email"]
     user = session.exec(select(User).where(User.email == email)).first()
 
+    if user and (user.is_blacklisted or user.is_banned):
+        request.session.pop("pending_oauth_link", None)
+        return _blacklist_denied(request, user)
+
     if user:
         user.oauth_provider = "google"
         user.oauth_id = oauth_data["oauth_id"]
+        # Tokens are already encrypted when stored in the pending link session
         user.oauth_access_token = oauth_data["access_token"]
         user.oauth_refresh_token = oauth_data["refresh_token"]
         if not user.username:
@@ -140,7 +171,7 @@ async def link_account_confirm(request: Request, session: Session = Depends(get_
 
 
 @router.get("/unlink")
-async def unlink_google(request: Request, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+async def unlink_google(request: Request, current_user: User = Depends(get_current_active_user), session: Session = Depends(get_session)):
     """Unlink Google account from current user."""
     if current_user.oauth_provider == "google" and current_user.hashed_password is None:
         raise HTTPException(

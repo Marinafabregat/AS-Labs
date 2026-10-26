@@ -9,7 +9,23 @@ services:
       - ./.env:/app/project/.env:ro
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     restart: unless-stopped
+
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    profiles: ["security"]
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./zap:/zap/wrk:rw
+    command: ["zap.sh", "-cmd", "-autorun", "/zap/wrk/zap-plan.yaml"]
+    restart: "no"
 
   nginx:
     image: nginx:alpine

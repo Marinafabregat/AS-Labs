@@ -30,3 +30,12 @@ htmlcov/
 *.tox/
 *.mypy_cache/
 
+# OWASP ZAP
+zap/reports/*
+!zap/reports/.gitkeep
+!zap/reports/zap-report_v1.html
+!zap/reports/zap-report_v1.json
+zap/wrk/
+zap/.zap/
+
+bugs.txt

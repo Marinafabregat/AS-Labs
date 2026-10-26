@@ -110,7 +110,7 @@
                     {% else %}
                         
                         <form action="/items/{{ item.id }}/like" method="POST">
-                            <button type="submit" 
+                            <button type="submit"
                                     class="w-full flex items-center justify-center space-x-2 border-2 border-rose-500 text-rose-600 hover:bg-rose-50 font-bold py-2.5 px-4 rounded-xl transition">
                                 {% if is_liked %}
                                     <span>💔 Dislike item</span>
@@ -134,17 +134,27 @@
 
                             <!-- Modern Owner Controls -->
                             <div class="grid grid-cols-2 gap-3 pt-1">
-                                <a href="/items/{{ item.id }}/edit" 
-                                   class="w-full flex items-center justify-center space-x-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold py-2.5 px-4 rounded-xl shadow-sm transition-all duration-150">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                    <span>Edit Listing</span>
-                                </a>
+                                {% if not user.is_blacklisted %}
+                                    <a href="/items/{{ item.id }}/edit"
+                                       class="w-full flex items-center justify-center space-x-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold py-2.5 px-4 rounded-xl shadow-sm transition-all duration-150">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                        <span>Edit Listing</span>
+                                    </a>
+                                {% else %}
+                                    <div class="w-full flex items-center justify-center space-x-2 bg-slate-100/80 text-slate-600 text-sm font-medium py-2.5 px-4 rounded-xl border border-slate-200/60 cursor-not-allowed">
+                                        <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                        </svg>
+                                        <span>Disabled while report is pending</span>
+                                        <span> Please wait for admin review</span>
+                                    </div>
+                                {% endif %}
 
                                 <form action="/items/{{ item.id }}/delete" method="POST" class="w-full"
                                       onsubmit="return confirm('Are you sure you want to delete this listing?');">
-                                    <button type="submit" 
+                                    <button type="submit"
                                             class="w-full flex items-center justify-center space-x-2 border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 text-sm font-semibold py-2.5 px-4 rounded-xl transition-all duration-150">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -154,12 +164,18 @@
                                 </form>
                             </div>
                         {% else %}
-                            <form action="/items/{{ item.id }}/buy" method="POST">
-                                <button type="submit" 
-                                        class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold py-3 px-4 rounded-xl shadow-md hover:shadow-lg transition">
-                                    🛒 Buy for {{ "%.2f"|format(item.price) }} €
-                                </button>
-                            </form>
+                            {% if user.is_blacklisted %}
+                                <div class="w-full bg-rose-50 border border-rose-200 text-rose-700 font-semibold py-3 px-4 text-center rounded-xl text-sm">
+                                    Buying and selling are disabled while your report is pending. Wait for administrator review.
+                                </div>
+                            {% else %}
+                                <form action="/items/{{ item.id }}/buy" method="POST">
+                                    <button type="submit"
+                                            class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold py-3 px-4 rounded-xl shadow-md hover:shadow-lg transition">
+                                        🛒 Buy for {{ "%.2f"|format(item.price) }} €
+                                    </button>
+                                </form>
+                            {% endif %}
 
                             <!-- Report Listing Collapsible / Button -->
                             <details class="group mt-2">
@@ -191,11 +207,12 @@
 
         </div>
      
+    {% if user and not missing_address_error and not item.is_blacklisted and not is_purchased %}    
     <!-- TODO ADD LOGIC SO CAT DOESNT ALWAYS SHOW -->
     <div id="shopping-cat" style="position: fixed; bottom: 5rem; right: 4.5rem; z-index: 99999; pointer-events: none; transition: all 1s ease-in-out;">
         <div id="cat-sprite" class="cat-idle" style="width: 64px; height: 64px; background-repeat: no-repeat;"></div>
     </div>
-
+    {% endif %}
     <!-- Animation Keyframes & Classes -->
     <style>
     @keyframes idle-anim {
@@ -243,41 +260,42 @@
 
     <!-- JavaScript Animation Trigger -->
     <script>
-document.addEventListener("DOMContentLoaded", () => {
-    const buyForm = document.querySelector("form[action*='/buy']");
-    const cat = document.getElementById("shopping-cat");
-    const catSprite = document.getElementById("cat-sprite");
+    document.addEventListener("DOMContentLoaded", () => {
+        const buyForm = document.querySelector("form[action*='/buy']");
+        const cat = document.getElementById("shopping-cat");
+        const catSprite = document.getElementById("cat-sprite");
 
-    if (buyForm) {
-        buyForm.addEventListener("submit", function (e) {
-            // 1. Stop the form from reloading the page instantly so we can watch the animation
-            e.preventDefault();
+        if (buyForm) {
+            buyForm.addEventListener("submit", function (e) {
+                // 1. Stop the form from reloading the page instantly so we can watch the animation
+                e.preventDefault();
 
-            // 2. Step 1: Smoothly move to center & play walk animation
-            cat.style.right = "50%";
-            cat.style.transform = "translateX(50%)";
-            catSprite.className = "cat-idle";
+                // 2. Step 1: Smoothly move to center & play walk animation
+                cat.style.right = "50%";
+                cat.style.transform = "translateX(50%)";
+                catSprite.className = "cat-idle";
 
-            // 3. Step 2: Once it reaches the center (after 1.5s), play shop action animation
-            setTimeout(() => {
-                catSprite.className = "cat-shop";
-            }, 1000);
-                
-                
-            // 4. Step 3: After the shop action, walk off-screen to the left (after 3s)
-            setTimeout(() => {
-                cat.style.right = "150%";
-                cat.style.transform = "translateX(70%)";
-                catSprite.className = "cat-walk";
-            }, 1500);
+                // 3. Step 2: Once it reaches the center (after 1.5s), play shop action animation
+                setTimeout(() => {
+                    catSprite.className = "cat-shop";
+                }, 1000);
+                    
+                    
+                // 4. Step 3: After the shop action, walk off-screen to the left (after 3s)
+                setTimeout(() => {
+                    cat.style.right = "150%";
+                    cat.style.transform = "translateX(70%)";
+                    catSprite.className = "cat-walk";
+                }, 1500);
 
-            // 5. Finally, let the actual form submit and process the purchase after the animation finishes (4.5s)
-            setTimeout(() => {
-                HTMLFormElement.prototype.submit.call(buyForm);
-            }, 3000);
-        });
-    }
-});
-</script>
+                // 5. Finally, let the actual form submit and process the purchase after the animation finishes (4.5s)
+                setTimeout(() => {
+                    HTMLFormElement.prototype.submit.call(buyForm);
+                }, 3000);
+            });
+        }
+    });
+    </script>
+
 </main>
 {% endblock %}

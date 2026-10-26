@@ -15,7 +15,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session, select 
@@ -23,8 +22,9 @@ from sqlmodel import Session, select
 from db import engine, init_db, get_session
 from models import Base, Category, Item, ItemReport, Like, ModPetition, Purchase, User, UserRole
 from auth import hash_password, verify_password, get_current_user, get_current_user_optional, require_admin
-from routes import users, auth, items
 from image_storage import migrate_plaintext_uploads
+from routes import users, oauth_routes, items, mod, admin
+from template_context import templates
 
 load_dotenv()
 
@@ -32,7 +32,7 @@ load_dotenv()
 project_root = Path(__file__).parent
 uploads_dir = project_root / "uploads"
 uploads_dir.mkdir(exist_ok=True)
-db_path = project_root / "database.db"
+db_path = Path(engine.url.database) if engine.url.database else project_root / "database.db"
 
 
 def seed_default_data(engine):
@@ -155,20 +155,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# HTTPS termination: nginx in Docker, plain HTTP for local uvicorn dev
+env_https_only = os.getenv("SESSION_HTTPS_ONLY")
+if env_https_only is None:
+    env_https_only = "true" if os.path.exists("/app") else "false"
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-in-production"),
-    https_only=False,
+    https_only=env_https_only.lower() == "true",
     same_site="lax",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # NOTE: /uploads is intentionally NOT mounted. Images are encrypted at rest and only
 # served, decrypted, through the authorized route GET /items/{id}/image.
-templates = Jinja2Templates(directory="templates")
 
 app.include_router(users.router)
+app.include_router(oauth_routes.router)
 app.include_router(items.router)
+app.include_router(mod.router)
+app.include_router(admin.router)
+
 
 print("Marketplace application VINSEC started successfully.")
 
