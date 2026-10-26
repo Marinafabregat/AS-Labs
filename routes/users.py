@@ -208,6 +208,25 @@ async def update_profile(
     current_user.phone_number = encrypt_pii(phone_number)
 
     if password and password.strip():
+        if (
+              len(password) < 8
+              or not re.search(r"[A-Z]", password)
+              or not re.search(r"[0-9]", password)
+              or not re.search(r"[\W_]", password)
+            ):
+                return templates.TemplateResponse(
+                    request,
+                    "users/profile.html",
+                    {
+                        "error": (
+                            "Password must be at least 8 characters long and include an"
+                            " uppercase letter, a number, and a special character."
+                        ),
+                        "user": current_user,
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+        
         current_user.hashed_password = hash_password(password)
 
     session.add(current_user)
