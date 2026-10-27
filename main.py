@@ -59,13 +59,11 @@ def seed_default_data(engine):
             log.info("Los datos iniciales ya existen.")
             return
 
-        # Copiar imágenes de ejemplo si existen.
+        # Seed images: encrypted straight from static/ into uploads/<name>.enc (never plaintext)
         for seed_img in ["keyboard.jpg", "textbook.jpg"]:
             src = project_root / "static" / seed_img
-            dst = uploads_dir / seed_img
-
-            if src.exists() and not dst.exists():
-                shutil.copy(src, dst)
+            if src.exists():
+                save_image(seed_img, src.read_bytes())
 
         # 1. Usuarios iniciales.
         admin_user = User(
@@ -180,8 +178,11 @@ def seed_default_data(engine):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Obligatorio: sin política cargada, todo se deniega.
     init_authzforce()
+    # Encrypt any plaintext image left in uploads/ (legacy uploads)
+    n = migrate_plaintext_uploads()
+    if n:
+        print(f"Encrypted {n} plaintext image(s) at rest.")
     if db_path.exists():
         print("database.db already exists, delete file if you'd like to start with default values")
         init_db()
@@ -233,21 +234,9 @@ app.add_middleware(
     max_age=60 * 60 * 8,
 )
 
-# Archivos estáticos e imágenes subidas.
-app.mount(
-    "/static",
-    StaticFiles(directory="static"),
-    name="static",
-)
-
-app.mount(
-    "/uploads",
-    StaticFiles(directory="uploads"),
-    name="uploads",
-)
-
-
-# Registrar las rutas de la aplicación.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+# NOTE: /uploads is intentionally NOT mounted. Images are encrypted at rest and only
+# served, decrypted, through the authorized route GET /items/{id}/image.
 app.include_router(users.router)
 app.include_router(oauth_routes.router)
 app.include_router(items.router)

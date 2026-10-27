@@ -45,7 +45,7 @@
             {% for item in items %}
             <a href="/items/{{ item.id }}" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition">
                 {% if item.image_filename %}
-                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="w-full h-44 object-cover">
+                <img src="/items/{{ item.id }}/image" alt="{{ item.title }}" class="w-full h-44 object-cover">
                 {% else %}
                 <div class="w-full h-44 bg-slate-100 flex items-center justify-center text-slate-400 text-sm">No available photo</div>
                 {% endif %}

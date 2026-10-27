@@ -34,7 +34,7 @@
         <!-- Product Image Container -->
         <div class="bg-slate-50 flex items-center justify-center p-6 border-b md:border-b-0 md:border-r border-slate-200 {% if item.is_blacklisted %}opacity-60 grayscale-[40%]{% endif %}">
             {% if item.image_filename %}
-                <img src="/uploads/{{ item.image_filename }}" alt="{{ item.title }}" class="max-h-96 w-full object-cover rounded-xl shadow-sm">
+                <img src="/items/{{ item.id }}/image" alt="{{ item.title }}" class="max-h-96 w-full object-cover rounded-xl shadow-sm">
             {% else %}
                 <div class="h-64 w-full bg-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400">
                     <span class="text-4xl mb-2">📷</span>

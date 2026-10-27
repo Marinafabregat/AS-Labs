@@ -4,6 +4,10 @@ import os
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
+from dotenv import load_dotenv
+
+# Load .env BEFORE reading keys below (this module is imported before main.py calls load_dotenv)
+load_dotenv()
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 log = logging.getLogger("crypto")
@@ -64,19 +68,24 @@ else:
     log.warning("IMAGE_ENCRYPTION_KEY no definida: usando clave de desarrollo INSEGURA")
     IMAGE_KEY = bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
 
-aesgcm = AESGCM(IMAGE_KEY)
+aesgcm = AESGCM(_load_image_key())
 
+def encrypt_image(image_bytes: bytes, aad: Optional[bytes] = None) -> bytes:
+    """Encrypt image bytes with AES-256-GCM.
 
-def encrypt_image(image_bytes: bytes) -> bytes:
-    """Nonce de 12 bytes al inicio del resultado."""
+    A fresh random 96-bit nonce is generated per call and prepended to the output:
+    nonce (12 bytes) || ciphertext || GCM tag (16 bytes).
+    `aad` (associated data) is authenticated but not encrypted; we bind it to the
+    stored filename so a ciphertext cannot be swapped between files undetected.
+    """
     if not image_bytes:
         return b""
     nonce = os.urandom(12)
-    return nonce + aesgcm.encrypt(nonce, image_bytes, associated_data=None)
+    return nonce + aesgcm.encrypt(nonce, image_bytes, aad)
 
-
-def decrypt_image(encrypted_data: bytes) -> bytes:
-    if not encrypted_data or len(encrypted_data) < 12:
-        return b""
-    nonce, ciphertext = encrypted_data[:12], encrypted_data[12:]
-    return aesgcm.decrypt(nonce, ciphertext, associated_data=None)
+def decrypt_image(encrypted_data: bytes, aad: Optional[bytes] = None) -> bytes:
+    """Split off the nonce and decrypt. Raises cryptography.exceptions.InvalidTag
+    if the data was tampered with, the key is wrong, or the aad does not match."""
+    if not encrypted_data or len(encrypted_data) < 12 + 16:
+        raise ValueError("Encrypted image is truncated or empty")
+    return aesgcm.decrypt(encrypted_data[:12], encrypted_data[12:], aad)

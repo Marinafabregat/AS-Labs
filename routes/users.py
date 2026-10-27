@@ -32,6 +32,7 @@ from models import (
 )
 from security_encryption import decrypt_pii, encrypt_pii
 from template_context import templates
+import re
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -151,6 +152,30 @@ async def register_user(
 ):
     # XACML decides whether an anonymous subject may create an account.
     enforce(None, "create", "user", {})
+    """Handle user registration without PII delivery data."""
+    if (
+      len(password) < 8
+      or not re.search(r"[A-Z]", password)
+      or not re.search(r"[0-9]", password)
+      or not re.search(r"[\W_]", password)
+    ):
+        return templates.TemplateResponse(
+            request,
+            "users/register.html",
+            {
+                "error": (
+                    "Password must be at least 8 characters long and include an"
+                    " uppercase letter, a number, and a special character."
+                ),
+                "username": username,
+                "email": email,
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    existing_user = session.exec(
+        select(User).where((User.username == username) | (User.email == email))
+    ).first()
 
     username = username.strip()
     email = email.strip().lower()
@@ -294,7 +319,17 @@ async def profile_page(
     pii = {
         field: decrypt_pii(getattr(current_user, field))
         for field in PII_FIELDS
-    }
+    """Display profile page with decrypted PII delivery info for the user."""
+    #decrypt sensitive fields
+    user_data = {
+        **current_user.model_dump(),
+        "delivery_address_line1": decrypt_pii(current_user.delivery_address_line1),
+        "delivery_address_line2": decrypt_pii(current_user.delivery_address_line2),
+        "postal_code": decrypt_pii(current_user.postal_code),
+        "city": decrypt_pii(current_user.city),
+        "country": decrypt_pii(current_user.country),
+        "phone_number": decrypt_pii(current_user.phone_number),
+    } }
 
     petition = _latest_mod_petition(session, current_user.id)
 
@@ -340,7 +375,35 @@ async def update_profile(
     email = email.strip().lower()
     new_password = password if password and password.strip() else None
 
-    submitted_pii = {
+    if password and password.strip():
+        if (
+              len(password) < 8
+              or not re.search(r"[A-Z]", password)
+              or not re.search(r"[0-9]", password)
+              or not re.search(r"[\W_]", password)
+            ):
+                return templates.TemplateResponse(
+                    request,
+                    "users/profile.html",
+                    {
+                        "error": (
+                            "Password must be at least 8 characters long and include an"
+                            " uppercase letter, a number, and a special character."
+                        ),
+                        "user": current_user,
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+        
+        current_user.hashed_password = hash_password(password)
+
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    # Prepare decrypted user view for template response
+    user_data = {
+        **current_user.model_dump(),
         "delivery_address_line1": address_line1,
         "delivery_address_line2": address_line2,
         "postal_code": postal_code,
