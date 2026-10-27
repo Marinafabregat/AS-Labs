@@ -157,10 +157,7 @@ def _render_profile_error(
     )
 
 
-# ---------------------------------------------------------
 # REGISTRATION
-# ---------------------------------------------------------
-
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
@@ -188,13 +185,13 @@ async def register_user(
     error = None
 
     if not username:
-        error = "El nombre de usuario es obligatorio."
+        error = "Username is required."
     elif not email or "@" not in email:
-        error = "Introduce un email válido."
+        error = "Please enter a valid email address."
     elif not _valid_password(password):
         error = (
-            "La contraseña debe tener al menos 8 caracteres e incluir "
-            "una mayúscula, un número y un carácter especial."
+            "Password must be at least 8 characters long and include "
+            "an uppercase letter, a number, and a special character."
         )
     else:
         existing_user = session.exec(
@@ -205,7 +202,7 @@ async def register_user(
         ).first()
 
         if existing_user:
-            error = "El nombre de usuario o el email ya están registrados."
+            error = "This username or email address is already registered."
 
     if error:
         return templates.TemplateResponse(
@@ -239,10 +236,7 @@ async def register_user(
     )
 
 
-# ---------------------------------------------------------
 # LOGIN AND LOGOUT
-# ---------------------------------------------------------
-
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
@@ -276,7 +270,7 @@ async def login_user(
         return templates.TemplateResponse(
             request=request,
             name="users/login.html",
-            context={"error": "Usuario o contraseña incorrectos."},
+            context={"error": "Incorrect username or password."},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -302,11 +296,7 @@ async def logout(request: Request):
         status_code=status.HTTP_302_FOUND,
     )
 
-
-# ---------------------------------------------------------
 # PROFILE AND UPDATE
-# ---------------------------------------------------------
-
 
 @router.get("/profile", response_class=HTMLResponse)
 async def profile_page(
@@ -314,7 +304,6 @@ async def profile_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    """Display the profile with decrypted delivery information."""
     enforce(
         current_user,
         "read",
@@ -331,7 +320,7 @@ async def profile_page(
     }
 
     if request.query_params.get("updated") == "true":
-        context["success"] = "Perfil actualizado correctamente."
+        context["success"] = "Profile updated successfully."
 
     return templates.TemplateResponse(
         request=request,
@@ -384,7 +373,7 @@ async def update_profile(
             request,
             current_user,
             session,
-            "Introduce un email válido.",
+            "Please enter a valid email address.",
             submitted_pii,
             email,
         )
@@ -395,8 +384,8 @@ async def update_profile(
             current_user,
             session,
             (
-                "La contraseña debe tener al menos 8 caracteres e incluir "
-                "una mayúscula, un número y un carácter especial."
+                "Password must be at least 8 characters long and include "
+                "an uppercase letter, a number, and a special character."
             ),
             submitted_pii,
             email,
@@ -416,7 +405,7 @@ async def update_profile(
                 request,
                 current_user,
                 session,
-                "Confirma tu contraseña actual para cambiar el email o la contraseña.",
+                "Please confirm your current password to change your email address or password.",
                 submitted_pii,
                 email,
             )
@@ -434,7 +423,7 @@ async def update_profile(
                 request,
                 current_user,
                 session,
-                "Ese email ya está registrado.",
+                "This email address is already registered.",
                 submitted_pii,
                 email,
             )
@@ -457,11 +446,7 @@ async def update_profile(
         status_code=status.HTTP_302_FOUND,
     )
 
-
-# ---------------------------------------------------------
 # MODERATOR APPLICATIONS
-# ---------------------------------------------------------
-
 
 @router.get("/mod-petition", response_class=HTMLResponse)
 async def mod_petition_page(
@@ -519,7 +504,7 @@ async def submit_mod_petition(
             context={
                 "user": _profile_view(current_user, _decrypted_pii(current_user)),
                 "petition": existing_petition,
-                "error": "Ya tienes una solicitud de moderador pendiente.",
+                "error": "You already have a pending moderator application.",
             },
             status_code=status.HTTP_409_CONFLICT,
         )
@@ -533,7 +518,7 @@ async def submit_mod_petition(
             context={
                 "user": _profile_view(current_user, _decrypted_pii(current_user)),
                 "petition": existing_petition,
-                "error": "Explica por qué solicitas ser moderador.",
+                "error": "Please explain why you want to become a moderator.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -587,11 +572,7 @@ async def cancel_mod_petition(
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
-
-# ---------------------------------------------------------
 # ACCOUNT DELETION
-# ---------------------------------------------------------
-
 
 @router.post("/delete")
 async def delete_account(
@@ -614,7 +595,7 @@ async def delete_account(
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Contraseña incorrecta.",
+                detail="Incorrect password.",
             )
 
     # Delete reports where the user is the target or the reporter.
@@ -635,11 +616,7 @@ async def delete_account(
         status_code=status.HTTP_302_FOUND,
     )
 
-
-# ---------------------------------------------------------
 # PUBLIC PROFILE AND USER REPORTS
-# ---------------------------------------------------------
-
 
 @router.get("/{user_id}", response_class=HTMLResponse)
 async def public_profile(

@@ -1,17 +1,3 @@
-# tools/check_access_bypass.py
-"""
-Static check: finds access decisions made outside XACML.
-
-Flags:
-1. COMPARE:     comparisons on role / ban / blacklist state outside authz.py.
-2. MANUAL-403:  HTTP 403 raised by hand instead of through enforce().
-                (401 is authentication, not authorization, so it is not checked.)
-3. NO-XACML:    endpoints that never reach enforce(), can() or xacml_decide(),
-                directly or through a helper defined in the same file.
-
-Run from the project root: python3 tools/check_access_bypass.py
-Exit code: 0 if clean, 1 if any finding.
-"""
 import ast
 import pathlib
 import sys
@@ -70,7 +56,6 @@ def called_names(node: ast.AST) -> set[str]:
 
 
 def is_endpoint(fn: ast.AST) -> bool:
-    """True if the function is decorated with a router or app HTTP method."""
     return any(
         isinstance(d, ast.Call) and getattr(d.func, "attr", "") in HTTP_METHODS
         for d in fn.decorator_list

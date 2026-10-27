@@ -40,13 +40,6 @@ def _redirect_admin() -> RedirectResponse:
     )
 
 
-# ---------------------------------------------------------
-# LOADERS
-# Loaders only check that the record exists. Status checks happen
-# AFTER enforce(), so unauthorized users cannot learn a report's state.
-# ---------------------------------------------------------
-
-
 def _load_user_report(session: Session, report_id: int) -> UserReport:
     report = session.get(UserReport, report_id)
 
@@ -142,11 +135,7 @@ def _ensure_not_reviewed(petition: ModPetition) -> None:
             detail="Moderator petition already reviewed",
         )
 
-
-# ---------------------------------------------------------
 # ADMIN DASHBOARD
-# ---------------------------------------------------------
-
 
 @router.get("/admin-reports", response_class=HTMLResponse)
 async def admin_reports_page(
@@ -217,11 +206,7 @@ async def admin_reports_page(
         },
     )
 
-
-# ---------------------------------------------------------
 # USER REPORTS: BAN / REVERT / UNBAN
-# ---------------------------------------------------------
-
 
 @router.post("/admin-reports/users/{report_id}/ban")
 async def admin_ban_user_report(
@@ -362,11 +347,7 @@ async def admin_unban_user(
 
     return _redirect_admin()
 
-
-# ---------------------------------------------------------
 # MODERATOR APPLICATIONS
-# ---------------------------------------------------------
-
 
 @router.post("/mod-petitions/{petition_id}/approve")
 async def approve_mod_petition(
@@ -424,11 +405,7 @@ async def reject_mod_petition(
 
     return _redirect_admin()
 
-
-# ---------------------------------------------------------
 # DELETE USERS AND ITEMS
-# ---------------------------------------------------------
-
 
 @router.post("/admin-reports/users/{user_id}/delete")
 async def admin_delete_user(

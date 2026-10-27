@@ -1,10 +1,3 @@
-"""
-Authentication (who is the user?) and session handling.
-
-Authorization (may this user do this?) is NOT decided here. The account
-state (banned / suspended) is evaluated by XACML through the "session"
-action, so this file contains no role or ban checks.
-"""
 from typing import Optional
 from uuid import UUID
 
@@ -73,8 +66,6 @@ def get_current_user_optional(
     session: Session = Depends(get_session),
 ) -> Optional[User]:
     """
-    Return the logged-in user, or None for anonymous visitors.
-
     An account that XACML does not allow to use the application (banned or
     suspended) is treated as anonymous on public pages.
     """
@@ -96,9 +87,5 @@ def get_current_user_optional(
 
 
 def get_current_active_user(user: User = Depends(get_current_user)) -> User:
-    """
-    Require an authenticated user that XACML allows to use the application.
-    Denied accounts receive 403 from enforce().
-    """
     enforce(user, "session", "account", account_attrs(user))
     return user

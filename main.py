@@ -121,7 +121,7 @@ def seed_default_data(engine):
         session.refresh(cat_electronics)
         session.refresh(cat_books)
 
-        # Anuncios iniciales.
+    
         item1 = Item(
             title="Vintage Mechanical Keyboard",
             description=(
@@ -179,13 +179,10 @@ def seed_default_data(engine):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Inicializa la base de datos, AuthzForce y el almacenamiento cifrado."""
 
-    # Inicializar y comprobar las políticas XACML.
+    # XACML.
     init_authzforce()
 
-    # Cifrar imágenes antiguas que todavía estén en texto plano.
-    # La función debe identificar las imágenes que aún no están cifradas.
     n = migrate_plaintext_uploads()
 
     if n:
@@ -193,7 +190,6 @@ async def lifespan(app: FastAPI):
     else:
         log.info("No hay imágenes antiguas que necesiten cifrado.")
 
-    # Inicializar la base de datos y crear datos de prueba si procede.
     if db_path.exists():
         log.info(
             "La base de datos ya existe; se conservarán los datos actuales."
@@ -217,7 +213,6 @@ app = FastAPI(
 )
 
 
-# Configuración de sesiones.
 SESSION_SECRET = os.getenv("SESSION_SECRET_KEY")
 
 if not SESSION_SECRET:
@@ -233,7 +228,6 @@ if not SESSION_SECRET:
     )
 
 
-# HTTPS en Docker/producción; HTTP local para desarrollo.
 env_https_only = os.getenv("SESSION_HTTPS_ONLY")
 
 if env_https_only is None:
@@ -251,9 +245,7 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# No montar /uploads como directorio público.
-# Las imágenes deben servirse mediante la ruta autorizada:
-# GET /items/{id}/image
+
 app.include_router(users.router)
 app.include_router(oauth_routes.router)
 app.include_router(items.router)
@@ -273,7 +265,6 @@ async def index(
     categories = session.exec(select(Category)).all()
     all_items = session.exec(select(Item)).all()
 
-    # XACML determina qué anuncios puede ver cada usuario.
     visible_items = [
         item
         for item in all_items

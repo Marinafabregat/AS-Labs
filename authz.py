@@ -1,16 +1,3 @@
-"""
-PEP, PIP and AuthzForce PDP client (XACML 3.0).
-
-Single access-decision point for the application:
-- PAP: builds the XACML 3.0 PolicySet and publishes a new version to AuthzForce
-       at startup, then points the PDP root policy expression to it.
-- PIP: converts SQLModel objects into attributes (*_attrs helpers).
-- PDP: every decision is requested from AuthzForce as an XACML 3.0 XML request.
-       Only Permit grants access.
-- PEP: can() filters lists, enforce() protects actions.
-
-Routes must not compare roles or account states directly.
-"""
 import logging
 import os
 import time
@@ -56,10 +43,7 @@ ET.register_namespace("authz", AUTHZ_REST_NS)
 Builder = Callable[[ET.Element], None]
 
 
-# ============================================================
 # XML builders (PAP)
-# ============================================================
-
 def _tag(name: str) -> str:
     return f"{{{XACML_NS}}}{name}"
 
@@ -212,20 +196,16 @@ def _hidden_item() -> Builder:
     return _eq("is_blacklisted", XACML_RESOURCE, "true")
 
 
-def _target_is_staff() -> Builder:
-    return _any(
-        _eq("target_role", XACML_RESOURCE, "admin"),
-        _eq("target_role", XACML_RESOURCE, "moderator"),
-    )
+def _target_is_admin() -> Builder:
+    """The reported target is an administrator."""
+    return _eq("target_role", XACML_RESOURCE, "admin")
 
 
 def _status_is(*values: str) -> Builder:
     return _any(*[_eq("status", XACML_RESOURCE, v) for v in values])
 
 
-# ============================================================
 # PolicySet (PAP)
-# ============================================================
 
 def _build_policy_set(version: str) -> str:
     root = ET.Element(_tag("PolicySet"), {
@@ -237,6 +217,7 @@ def _build_policy_set(version: str) -> str:
 
     # 1. Suspended or banned accounts: read-only access to public content.
     account_status = _policy(root, "account-status-policy", None)
+    # Deny suspended or banned users every action except reading.
     _rule(
         account_status,
         "deny-suspended-account-except-read",
@@ -249,6 +230,7 @@ def _build_policy_set(version: str) -> str:
 
     # 2. Session: an authenticated account can use the application.
     session_policy = _policy(root, "account-session-policy", "account")
+    # Permit authenticated users to establish or use a session.
     _rule(
         session_policy,
         "permit-authenticated-session",
@@ -261,39 +243,60 @@ def _build_policy_set(version: str) -> str:
     items = _policy(root, "items-policy", "item")
 
     # Hidden items (moderation) are visible only to staff.
+    # Deny non-staff users access to read hidden items.
     _rule(items, "deny-hidden-item-read", "Deny", action="read",
           when=_all(_hidden_item(), _not(_is_staff())))
+    # Deny non-staff users from liking hidden items.
     _rule(items, "deny-hidden-item-like", "Deny", action="like",
           when=_all(_hidden_item(), _not(_is_staff())))
+    # Deny non-staff users from buying hidden items.
     _rule(items, "deny-hidden-item-buy", "Deny", action="buy",
           when=_all(_hidden_item(), _not(_is_staff())))
     # Sellers cannot edit a hidden item, so moderated content cannot be changed.
+    # Deny non-staff users from updating hidden items.
     _rule(items, "deny-hidden-item-update", "Deny", action="update",
           when=_all(_hidden_item(), _not(_is_staff())))
 
+    # Deny users from buying their own items.
+
     _rule(items, "deny-buy-own-item", "Deny", action="buy", when=_owner())
 
+    # Permit anyone to read items unless another rule denies access.
+
     _rule(items, "permit-item-read", "Permit", action="read")
+    # Permit authenticated users to create items.
     _rule(items, "permit-item-create", "Permit", action="create", when=_authenticated())
+    # Permit authenticated users to like items.
     _rule(items, "permit-item-like", "Permit", action="like", when=_authenticated())
+    # Permit authenticated users to buy items unless another rule denies access.
     _rule(items, "permit-item-buy", "Permit", action="buy", when=_authenticated())
+    # Permit item owners to update their own items.
     _rule(items, "permit-item-update-owner", "Permit", action="update", when=_owner())
+    # Permit item owners to delete their own items.
     _rule(items, "permit-item-delete-owner", "Permit", action="delete", when=_owner())
+    # Permit administrators to delete any item.
     _rule(items, "permit-item-delete-admin", "Permit", action="delete", role="admin")
     # NEW: direct removal of an item from a report. Admin only.
+    # Permit administrators to remove an item while handling a report.
     _rule(items, "permit-item-report-remove-admin", "Permit",
           action="report_remove", role="admin")
 
     # 4. Reports
     reports = _policy(root, "report-policy", "report")
 
+    # Deny users from reporting their own account or item.
+
     _rule(reports, "deny-self-report", "Deny", action="create", when=_owner())
 
-    # Moderators cannot report or decide on staff accounts.
-    _rule(reports, "deny-moderator-report-staff", "Deny",
-          action="create", role="moderator", when=_target_is_staff())
-    _rule(reports, "deny-moderator-decide-staff", "Deny",
-          action="decide", role="moderator", when=_target_is_staff())
+    # Deny moderators from creating reports against administrator accounts.
+    # Deny moderators from creating reports against administrator accounts.
+    _rule(reports, "deny-moderator-report-admin", "Deny",
+          action="create", role="moderator", when=_target_is_admin())
+    # Deny moderators from deciding reports against administrator accounts.
+    # Deny moderators from deciding reports against administrator accounts.
+    _rule(reports, "deny-moderator-decide-admin", "Deny",
+          action="decide", role="moderator", when=_target_is_admin())
+    # Permit moderators to decide reports that are still pending.
     _rule(
         reports,
         "permit-moderator-decide-pending",
@@ -302,45 +305,64 @@ def _build_policy_set(version: str) -> str:
         role="moderator",
         when=_status_is("pending")
     )
+    # Permit authenticated users to create reports.
     _rule(reports, "permit-create-report", "Permit",
           action="create", when=_authenticated())
 
+    # Permit moderators to read pending and escalated reports.
+
     _rule(reports, "permit-moderator-read-reports", "Permit",
           action="read", role="moderator", when=_status_is("pending", "for_admin"))
+    # Permit administrators to read reports escalated to them.
     _rule(reports, "permit-admin-read-escalated", "Permit",
           action="read", role="admin", when=_status_is("for_admin"))
+    # Permit administrators to decide reports escalated to them.
     _rule(reports, "permit-admin-escalated-decide", "Permit",
           action="escalated_decide", role="admin", when=_status_is("for_admin"))
 
+    # Permit moderators to escalate reports for administrator review.
+
     _rule(reports, "permit-moderator-create-escalated", "Permit",
           action="create_escalated", role="moderator")
+    # Permit administrators to create escalated reports.
     _rule(reports, "permit-admin-create-escalated", "Permit",
           action="create_escalated", role="admin")
+    # Deny regular users from creating reports against administrator accounts.
+    _rule(reports, "deny-user-report-admin", "Deny",
+      action="create", role="user", when=_target_is_admin())
 
     # 5. Administrative actions
     admin = _policy(root, "admin-action-policy", "admin_action")
 
     # Admins cannot act on their own account.
     for action in ("ban", "unban", "delete_user", "revert"):
+        # Deny administrators from applying this action to their own account.
         _rule(admin, f"deny-admin-self-{action}", "Deny",
               action=action, role="admin", when=_owner())
 
     for action in ("view", "ban", "revert", "unban", "delete_user"):
+        # Permit administrators to perform this administrative action.
         _rule(admin, f"permit-admin-{action}", "Permit",
               action=action, role="admin")
 
     # 6. Moderator applications
     petitions = _policy(root, "mod-petition-policy", "mod_petition")
 
+    # Permit regular users to submit moderator applications.
+
     _rule(petitions, "permit-user-create-petition", "Permit",
           action="create", role="user", when=_authenticated())
+    # Permit applicants to read their own moderator applications.
     _rule(petitions, "permit-owner-read-petition", "Permit",
           action="read", when=_owner())
+    # Permit administrators to read moderator applications.
     _rule(petitions, "permit-admin-read-petitions", "Permit",
           action="read", role="admin")
+    # Permit applicants to delete their own moderator applications.
     _rule(petitions, "permit-owner-delete-petition", "Permit",
           action="delete", when=_owner())
     # Only applications from regular users can be reviewed.
+    # Permit administrators to review applications submitted by regular users.
     _rule(petitions, "permit-admin-review-petitions", "Permit",
           action="review", role="admin",
           when=_eq("applicant_role", XACML_RESOURCE, "user"))
@@ -350,38 +372,45 @@ def _build_policy_set(version: str) -> str:
 
     # Suspended profile: hidden from everyone except the owner and moderators.
     # According to the privacy matrix, admins cannot see it either.
+    # Deny access to suspended profiles except to the owner and moderators.
     _rule(profiles, "deny-suspended-profile-to-others", "Deny", action="read",
           when=_all(
               _resource_suspended(),
               _not(_owner()),
               _not(_eq("role", XACML_SUBJECT, "moderator")),
           ))
+    # Permit users to read public profiles.
     _rule(profiles, "permit-public-profile-read", "Permit", action="read")
 
     # 8. Personal data (PII)
     pii = _policy(root, "user-pii-policy", "user_pii")
 
+    # Deny unauthenticated users access to personal information.
+
     _rule(pii, "deny-anonymous-pii", "Deny", when=_authenticated(False))
     for action in ("read", "update", "delete"):
+        # Permit users to perform this personal-data action on their own data.
         _rule(pii, f"permit-owner-pii-{action}", "Permit",
               action=action, when=_owner())
 
     # 9. Registration and login
     users = _policy(root, "user-policy", "user")
 
+    # Permit anonymous visitors to register an account.
+
     _rule(users, "permit-anonymous-registration", "Permit",
           action="create", role="anonymous")
+    # Deny suspended or banned accounts from logging in.
     _rule(users, "deny-login-suspended", "Deny",
           action="login", when=_resource_suspended())
+    # Permit login requests unless another rule denies access.
     _rule(users, "permit-login", "Permit", action="login")
 
     body = ET.tostring(root, encoding="unicode")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + body
 
 
-# ============================================================
 # XML request (PDP)
-# ============================================================
 
 # Maps XACML attribute ids to the keys produced by subject_from_user().
 _SUBJECT_KEYS = {
@@ -568,9 +597,7 @@ def _self_test() -> None:
     log.info("AuthzForce self-test passed (%d cases).", len(cases))
 
 
-# ============================================================
 # Network and publication to AuthzForce
-# ============================================================
 
 def _resolve_href(href: str, base_url: str) -> str:
     """Resolves an absolute or relative href returned by AuthzForce."""
@@ -706,9 +733,7 @@ def init_authzforce() -> None:
     _self_test()
 
 
-# ============================================================
 # PIP: subject and resource attributes
-# ============================================================
 
 def _bool_str(value: Any) -> str:
     return "true" if bool(value) else "false"
@@ -807,9 +832,7 @@ def petition_review_attrs(applicant: User) -> dict[str, Any]:
     }
 
 
-# ============================================================
 # PEP
-# ============================================================
 
 def can(
     user: Optional[User],

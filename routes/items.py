@@ -67,11 +67,7 @@ FORMAT_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 # Example images copied at seed time. They are never deleted.
 SEED_IMAGES = {"keyboard.jpg", "textbook.jpg"}
 
-
-# ---------------------------------------------------------
 # IMAGE HELPERS
-# ---------------------------------------------------------
-
 
 async def read_upload_limited(image: UploadFile) -> bytes:
     """Read an upload in chunks and stop as soon as it exceeds the size limit."""
@@ -194,11 +190,7 @@ def load_item_or_404(session: Session, item_id: int) -> Item:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
 
-
-# ---------------------------------------------------------
 # IMAGES (decrypted in memory, authorized by XACML)
-# ---------------------------------------------------------
-
 
 @router.get("/{item_id}/image")
 async def item_image(
@@ -231,11 +223,7 @@ async def item_image(
         },
     )
 
-
-# ---------------------------------------------------------
 # CREATE
-# ---------------------------------------------------------
-
 
 @router.get("/create", response_class=HTMLResponse)
 async def create_item_page(
@@ -250,7 +238,6 @@ async def create_item_page(
         name="create_item.html",
         context={"user": current_user, "categories": categories},
     )
-
 
 @router.post("/create")
 async def create_item(
@@ -310,11 +297,7 @@ async def create_item(
         url=f"/items/{new_item.id}", status_code=status.HTTP_302_FOUND
     )
 
-
-# ---------------------------------------------------------
 # LISTS
-# ---------------------------------------------------------
-
 
 @router.get("/liked", response_class=HTMLResponse)
 async def liked_items_page(
@@ -398,11 +381,7 @@ async def my_items_page(
         },
     )
 
-
-# ---------------------------------------------------------
 # EDIT
-# ---------------------------------------------------------
-
 
 @router.get("/{item_id}/edit", response_class=HTMLResponse)
 async def edit_item_page(
@@ -503,11 +482,7 @@ async def edit_item(
         url=f"/items/{item.id}", status_code=status.HTTP_302_FOUND
     )
 
-
-# ---------------------------------------------------------
 # DELETE
-# ---------------------------------------------------------
-
 
 @router.post("/{item_id}/delete")
 async def delete_item(
@@ -545,11 +520,7 @@ async def delete_item(
         url="/items/my-items", status_code=status.HTTP_302_FOUND
     )
 
-
-# ---------------------------------------------------------
 # REPORT
-# ---------------------------------------------------------
-
 
 @router.post("/{item_id}/report")
 async def report_item(
@@ -576,7 +547,7 @@ async def report_item(
         )
 
     # XACML decides whether this report goes straight to admins (and hides the
-    # item) or stays pending for a moderator. Admins may remove the item directly.
+    # item) or stays pending for a moderator.
     if can(current_user, "delete", "item", item_attrs(item)) and can(
         current_user, "report_remove", "item", item_attrs(item)
     ):
@@ -606,11 +577,7 @@ async def report_item(
         url=f"/items/{item_id}?reported=true", status_code=status.HTTP_302_FOUND
     )
 
-
-# ---------------------------------------------------------
 # ITEM DETAIL
-# ---------------------------------------------------------
-
 
 @router.get("/{item_id}", response_class=HTMLResponse)
 async def item_detail(
@@ -674,11 +641,7 @@ async def item_detail(
         },
     )
 
-
-# ---------------------------------------------------------
 # LIKE
-# ---------------------------------------------------------
-
 
 @router.post("/{item_id}/like")
 async def toggle_like(
@@ -705,11 +668,7 @@ async def toggle_like(
         url=f"/items/{item_id}", status_code=status.HTTP_302_FOUND
     )
 
-
-# ---------------------------------------------------------
 # BUY
-# ---------------------------------------------------------
-
 
 @router.post("/{item_id}/buy")
 async def buy_item(

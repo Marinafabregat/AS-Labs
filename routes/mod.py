@@ -22,13 +22,6 @@ def _redirect_to_reports() -> RedirectResponse:
     )
 
 
-# ---------------------------------------------------------
-# LOADERS
-# Loaders only check existence. The status check runs AFTER enforce(),
-# so the response for unauthorized users does not reveal the state.
-# ---------------------------------------------------------
-
-
 def _load_user_report(session: Session, report_id: int) -> UserReport:
     report = session.get(UserReport, report_id)
 
@@ -104,11 +97,7 @@ def _ensure_pending_item_report(report: ItemReport) -> None:
             detail="Pending item report not found",
         )
 
-
-# ---------------------------------------------------------
 # MODERATOR DASHBOARD
-# ---------------------------------------------------------
-
 
 @router.get(
     "/moderator-reports",
@@ -180,11 +169,7 @@ async def moderator_reports_page(
         },
     )
 
-
-# ---------------------------------------------------------
 # USER REPORTS
-# ---------------------------------------------------------
-
 
 @router.post("/moderator-reports/users/{report_id}/dismiss")
 async def dismiss_user_report(
@@ -240,11 +225,7 @@ async def accept_user_report(
 
     return _redirect_to_reports()
 
-
-# ---------------------------------------------------------
 # ITEM REPORTS
-# ---------------------------------------------------------
-
 
 @router.post("/moderator-reports/items/{report_id}/accept")
 async def accept_item_report(

@@ -1,14 +1,3 @@
-# tools/check_templates.py
-"""
-Static check: finds access decisions made inside HTML templates.
-
-Templates must not decide permissions. They may only render flags that the
-server computed with XACML (for example ui.can_edit). Any template that
-compares roles, ban state, ownership or links to /uploads/ is reported.
-
-Run from the project root: python3 tools/check_templates.py
-Exit code: 0 if clean, 1 if any finding.
-"""
 import pathlib
 import re
 import sys

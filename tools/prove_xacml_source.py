@@ -1,9 +1,3 @@
-"""
-Proves that the decision comes from the published PolicySet.
-Asks AuthzForce for the decision AND the identifiers of the policies that produced it.
-Run from the project root with AuthzForce up:
-    AUTHZFORCE_BASE_URL=http://localhost:8080/authzforce-ce python3 tools/prove_xacml_source.py
-"""
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
