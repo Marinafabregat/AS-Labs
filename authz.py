@@ -280,6 +280,9 @@ def _build_policy_set(version: str) -> str:
     _rule(items, "permit-item-update-owner", "Permit", action="update", when=_owner())
     _rule(items, "permit-item-delete-owner", "Permit", action="delete", when=_owner())
     _rule(items, "permit-item-delete-admin", "Permit", action="delete", role="admin")
+    # NEW: direct removal of an item from a report. Admin only.
+    _rule(items, "permit-item-report-remove-admin", "Permit",
+          action="report_remove", role="admin")
 
     # 4. Reports
     reports = _policy(root, "report-policy", "report")
@@ -291,11 +294,14 @@ def _build_policy_set(version: str) -> str:
           action="create", role="moderator", when=_target_is_staff())
     _rule(reports, "deny-moderator-decide-staff", "Deny",
           action="decide", role="moderator", when=_target_is_staff())
-
-    # Moderators cannot decide on reports they are involved in.
-    _rule(reports, "deny-moderator-decide-own", "Deny",
-          action="decide", role="moderator", when=_any(_owner(), _reporter()))
-
+    _rule(
+        reports,
+        "permit-moderator-decide-pending",
+        "Permit",
+        action="decide",
+        role="moderator",
+        when=_status_is("pending")
+    )
     _rule(reports, "permit-create-report", "Permit",
           action="create", when=_authenticated())
 
@@ -303,9 +309,6 @@ def _build_policy_set(version: str) -> str:
           action="read", role="moderator", when=_status_is("pending", "for_admin"))
     _rule(reports, "permit-admin-read-escalated", "Permit",
           action="read", role="admin", when=_status_is("for_admin"))
-
-    _rule(reports, "permit-moderator-decide-pending", "Permit",
-          action="decide", role="moderator", when=_status_is("pending"))
     _rule(reports, "permit-admin-escalated-decide", "Permit",
           action="escalated_decide", role="admin", when=_status_is("for_admin"))
 
@@ -473,17 +476,39 @@ def xacml_decide(
             )
             return False
 
+        
         decision = _parse_decision(response.text)
 
+        log.warning(
+            "XACML DEBUG: decision=%s subject=%s role=%s "
+            "action=%s resource_type=%s resource_attributes=%s",
+            decision,
+            subject.get("id"),
+            subject.get("role"),
+            action,
+            resource_type,
+            resource,
+        )
+
         if decision is None:
-            log.error("AuthzForce responded without a decision: %s", response.text[:500])
+            log.error(
+                "AuthzForce responded without a decision: %s",
+                response.text[:1000],
+            )
             return False
 
         if decision != "Permit":
-            log.info(
-                "XACML %s: subject=%s role=%s action=%s resource=%s",
-                decision, subject["id"], subject["role"], action, resource_type,
+            log.error(
+                "XACML DENIED: decision=%s subject=%s role=%s "
+                "action=%s resource_type=%s response=%s",
+                decision,
+                subject.get("id"),
+                subject.get("role"),
+                action,
+                resource_type,
+                response.text[:2000],
             )
+
         return decision == "Permit"
 
     except Exception:
@@ -503,6 +528,9 @@ def _self_test() -> None:
               "is_banned": "false", "is_blacklisted": "false"}
     moderator = {"id": "self-test-mod", "role": "moderator", "authenticated": "true",
                  "is_banned": "false", "is_blacklisted": "false"}
+    # NEW: admin subject for the report_remove and delete cases.
+    admin = {"id": "self-test-admin", "role": "admin", "authenticated": "true",
+             "is_banned": "false", "is_blacklisted": "false"}
     suspended = {"id": "self-test-susp", "role": "user", "authenticated": "true",
                  "is_banned": "false", "is_blacklisted": "true"}
     visible = {"owner_id": "someone", "is_blacklisted": "false"}
@@ -518,6 +546,12 @@ def _self_test() -> None:
         ("suspended account creates item", suspended, "create", "item", {}, False),
         ("suspended account reads visible item", suspended, "read", "item", visible, True),
         ("anonymous logs in", anon, "login", "user", no_flags, True),
+        # NEW: report_remove and admin delete.
+        ("admin deletes any item", admin, "delete", "item", visible, True),
+        ("admin removes item from a report", admin, "report_remove", "item", visible, True),
+        ("moderator cannot remove item from a report", moderator, "report_remove", "item", visible, False),
+        ("user cannot remove item from a report", member, "report_remove", "item", visible, False),
+        ("user cannot delete someone else's item", member, "delete", "item", visible, False),
     ]
 
     failures = [

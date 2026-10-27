@@ -1,14 +1,13 @@
-
 import logging
 import os
 import secrets
-import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Debe ejecutarse ANTES de importar módulos que leen variables de entorno.
+# Cargar las variables de entorno antes de importar módulos
+# que dependan de ellas.
 load_dotenv()
 
 from fastapi import Depends, FastAPI, Request
@@ -22,6 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from authz import can, item_attrs, init_authzforce
 from auth import get_current_user_optional, hash_password
 from db import engine, get_session, init_db
+from image_storage import save_image, migrate_plaintext_uploads
 from models import (
     Category,
     Item,
@@ -41,7 +41,7 @@ log = logging.getLogger("app")
 
 project_root = Path(__file__).parent
 uploads_dir = project_root / "uploads"
-uploads_dir.mkdir(exist_ok=True)
+uploads_dir.mkdir(parents=True, exist_ok=True)
 
 db_path = (
     Path(engine.url.database)
@@ -53,19 +53,20 @@ IN_DOCKER = os.path.exists("/app")
 
 
 def seed_default_data(engine):
-    """Puebla la base de datos con información inicial de prueba."""
+    """Crea los datos iniciales del marketplace."""
     with Session(engine) as session:
         if session.exec(select(User)).first():
             log.info("Los datos iniciales ya existen.")
             return
 
-        # Seed images: encrypted straight from static/ into uploads/<name>.enc (never plaintext)
-        for seed_img in ["keyboard.jpg", "textbook.jpg"]:
+        # Guardar las imágenes iniciales cifradas.
+        # save_image debe cifrar los bytes antes de escribirlos en uploads/.
+        for seed_img in ("keyboard.jpg", "textbook.jpg"):
             src = project_root / "static" / seed_img
             if src.exists():
                 save_image(seed_img, src.read_bytes())
 
-        # 1. Usuarios iniciales.
+        # Usuarios iniciales.
         admin_user = User(
             username="admin",
             email="admin@marketplace.com",
@@ -94,9 +95,12 @@ def seed_default_data(engine):
             role=UserRole.USER,
         )
 
-        session.add_all(
-            [admin_user, mod_user, seller_user, buyer_user]
-        )
+        session.add_all([
+            admin_user,
+            mod_user,
+            seller_user,
+            buyer_user,
+        ])
         session.commit()
 
         for user in (
@@ -107,7 +111,7 @@ def seed_default_data(engine):
         ):
             session.refresh(user)
 
-        # 2. Categorías iniciales.
+        # Categorías iniciales.
         cat_electronics = Category(name="Electronics")
         cat_books = Category(name="Books")
 
@@ -117,7 +121,7 @@ def seed_default_data(engine):
         session.refresh(cat_electronics)
         session.refresh(cat_books)
 
-        # 3. Anuncios iniciales.
+        # Anuncios iniciales.
         item1 = Item(
             title="Vintage Mechanical Keyboard",
             description=(
@@ -145,51 +149,61 @@ def seed_default_data(engine):
         session.refresh(item1)
         session.refresh(item2)
 
-        # 4. Interacciones de prueba.
-        session.add_all(
-            [
-                Like(
-                    user_id=buyer_user.id,
-                    item_id=item1.id,
+        # Interacciones de prueba.
+        session.add_all([
+            Like(
+                user_id=buyer_user.id,
+                item_id=item1.id,
+            ),
+            Purchase(
+                buyer_id=buyer_user.id,
+                item_id=item2.id,
+                price_paid=25.50,
+            ),
+            ItemReport(
+                item_id=item1.id,
+                reporter_id=mod_user.id,
+                reason="Item title contains questionable keywords.",
+            ),
+            ModPetition(
+                user_id=seller_user.id,
+                message=(
+                    "I'd like to apply to be a community moderator."
                 ),
-                Purchase(
-                    buyer_id=buyer_user.id,
-                    item_id=item2.id,
-                    price_paid=25.50,
-                ),
-                ItemReport(
-                    item_id=item1.id,
-                    reporter_id=mod_user.id,
-                    reason=(
-                        "Item title contains questionable keywords."
-                    ),
-                ),
-                ModPetition(
-                    user_id=seller_user.id,
-                    message=(
-                        "I'd like to apply to be a community moderator."
-                    ),
-                ),
-            ]
-        )
+            ),
+        ])
 
         session.commit()
         log.info("Datos iniciales del marketplace creados correctamente.")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Inicializa la base de datos, AuthzForce y el almacenamiento cifrado."""
+
+    # Inicializar y comprobar las políticas XACML.
     init_authzforce()
-    # Encrypt any plaintext image left in uploads/ (legacy uploads)
+
+    # Cifrar imágenes antiguas que todavía estén en texto plano.
+    # La función debe identificar las imágenes que aún no están cifradas.
     n = migrate_plaintext_uploads()
+
     if n:
-        print(f"Encrypted {n} plaintext image(s) at rest.")
+        log.info("Se han cifrado %s imágenes antiguas.", n)
+    else:
+        log.info("No hay imágenes antiguas que necesiten cifrado.")
+
+    # Inicializar la base de datos y crear datos de prueba si procede.
     if db_path.exists():
-        print("database.db already exists, delete file if you'd like to start with default values")
+        log.info(
+            "La base de datos ya existe; se conservarán los datos actuales."
+        )
         init_db()
     else:
-        print("database.db not found creating one with default values")
+        log.info("No existe la base de datos; se creará con datos iniciales.")
         init_db()
         seed_default_data(engine)
+
     yield
 
 
@@ -209,7 +223,7 @@ SESSION_SECRET = os.getenv("SESSION_SECRET_KEY")
 if not SESSION_SECRET:
     if IN_DOCKER:
         raise RuntimeError(
-            "SESSION_SECRET_KEY es obligatoria en Docker/producción"
+            "SESSION_SECRET_KEY es obligatoria en Docker/producción."
         )
 
     SESSION_SECRET = secrets.token_urlsafe(32)
@@ -234,9 +248,12 @@ app.add_middleware(
     max_age=60 * 60 * 8,
 )
 
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
-# NOTE: /uploads is intentionally NOT mounted. Images are encrypted at rest and only
-# served, decrypted, through the authorized route GET /items/{id}/image.
+
+# No montar /uploads como directorio público.
+# Las imágenes deben servirse mediante la ruta autorizada:
+# GET /items/{id}/image
 app.include_router(users.router)
 app.include_router(oauth_routes.router)
 app.include_router(items.router)
@@ -256,8 +273,7 @@ async def index(
     categories = session.exec(select(Category)).all()
     all_items = session.exec(select(Item)).all()
 
-    # La política XACML decide qué anuncios puede ver el usuario.
-    # Si AuthzForce no devuelve Permit, can() debe denegar el acceso.
+    # XACML determina qué anuncios puede ver cada usuario.
     visible_items = [
         item
         for item in all_items

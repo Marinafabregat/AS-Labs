@@ -256,6 +256,18 @@ async def accept_item_report(
     item = _load_item(session, report)
     seller = _load_seller(session, item)
 
+    # Debug information to investigate the 403 permission error.
+    print(
+        "DEBUG MODERATOR ACCEPT:",
+        "user_id =", current_user.id,
+        "role =", role_of(current_user),
+        "report_id =", report.id,
+        "status =", report.status,
+        "seller_id =", item.seller_id,
+        "reporter_id =", report.reporter_id,
+        "seller_role =", role_of(seller),
+    )
+
     enforce(
         current_user,
         "decide",
@@ -265,6 +277,7 @@ async def accept_item_report(
 
     _ensure_pending_item_report(report)
 
+    # Escalate the report to an admin and hide the reported item.
     report.status = ReportStatus.FOR_ADMIN
     item.is_blacklisted = True
 
@@ -295,8 +308,7 @@ async def dismiss_item_report(
 
     report.status = ReportStatus.DISMISSED
 
-    # Business rule: keep the item hidden if another escalated report
-    # still exists for it.
+    # Keep the item hidden if another escalated report still exists.
     still_reported = session.exec(
         select(ItemReport.id).where(
             ItemReport.item_id == item.id,

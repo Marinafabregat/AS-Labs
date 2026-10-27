@@ -1,7 +1,15 @@
+import re
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Form,
+    HTTPException,
+    Request,
+    status,
+)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select, delete
 
@@ -32,7 +40,6 @@ from models import (
 )
 from security_encryption import decrypt_pii, encrypt_pii
 from template_context import templates
-import re
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -52,13 +59,23 @@ MAX_PETITION_MESSAGE_LENGTH = 1000
 
 
 def _role_value(user: User) -> str:
-    """Return the role as a string, whether it is an Enum or a plain string."""
+    """Return the role as a string."""
     role = user.role
     return role.value if hasattr(role, "value") else str(role)
 
 
+def _valid_password(password: str) -> bool:
+    """Require at least 8 characters, uppercase, digit and special character."""
+    return (
+        len(password) >= MIN_PASSWORD_LENGTH
+        and re.search(r"[A-Z]", password) is not None
+        and re.search(r"[0-9]", password) is not None
+        and re.search(r"[\W_]", password) is not None
+    )
+
+
 def _profile_view(user: User, pii: Optional[dict] = None) -> dict:
-    """DTO for templates. Never includes the password hash or OAuth tokens."""
+    """DTO for templates; excludes password hashes and OAuth tokens."""
     pii_values = {field: None for field in PII_FIELDS}
 
     if pii:
@@ -75,6 +92,14 @@ def _profile_view(user: User, pii: Optional[dict] = None) -> dict:
         "is_banned": user.is_banned,
         "is_blacklisted": user.is_blacklisted,
         **pii_values,
+    }
+
+
+def _decrypted_pii(user: User) -> dict:
+    """Return the user's personal delivery fields in plaintext for display."""
+    return {
+        field: decrypt_pii(getattr(user, field))
+        for field in PII_FIELDS
     }
 
 
@@ -104,23 +129,26 @@ def _render_profile_error(
     session: Session,
     message: str,
     submitted_pii: Optional[dict] = None,
+    email: Optional[str] = None,
 ):
     """Re-render the profile page with a validation error."""
     petition = _latest_mod_petition(session, current_user.id)
 
-    if submitted_pii is None:
-        pii = {
-            field: decrypt_pii(getattr(current_user, field))
-            for field in PII_FIELDS
-        }
-    else:
-        pii = submitted_pii
+    pii = (
+        submitted_pii
+        if submitted_pii is not None
+        else _decrypted_pii(current_user)
+    )
+
+    user_view = _profile_view(current_user, pii)
+    if email is not None:
+        user_view["email"] = email
 
     return templates.TemplateResponse(
         request=request,
         name="users/profile.html",
         context={
-            "user": _profile_view(current_user, pii),
+            "user": user_view,
             "petition": petition,
             "has_mod_petition": petition is not None,
             "error": message,
@@ -150,55 +178,34 @@ async def register_user(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
+    """Register a user without delivery PII."""
     # XACML decides whether an anonymous subject may create an account.
     enforce(None, "create", "user", {})
-    """Handle user registration without PII delivery data."""
-    if (
-      len(password) < 8
-      or not re.search(r"[A-Z]", password)
-      or not re.search(r"[0-9]", password)
-      or not re.search(r"[\W_]", password)
-    ):
-        return templates.TemplateResponse(
-            request,
-            "users/register.html",
-            {
-                "error": (
-                    "Password must be at least 8 characters long and include an"
-                    " uppercase letter, a number, and a special character."
-                ),
-                "username": username,
-                "email": email,
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    existing_user = session.exec(
-        select(User).where((User.username == username) | (User.email == email))
-    ).first()
 
     username = username.strip()
     email = email.strip().lower()
 
     error = None
 
-    if len(password) < MIN_PASSWORD_LENGTH:
+    if not username:
+        error = "El nombre de usuario es obligatorio."
+    elif not email or "@" not in email:
+        error = "Introduce un email válido."
+    elif not _valid_password(password):
         error = (
-            f"La contraseña debe tener al menos "
-            f"{MIN_PASSWORD_LENGTH} caracteres."
+            "La contraseña debe tener al menos 8 caracteres e incluir "
+            "una mayúscula, un número y un carácter especial."
         )
-    elif not username or "@" not in email:
-        error = "Datos de registro no válidos."
     else:
-        existing = session.exec(
+        existing_user = session.exec(
             select(User).where(
                 (User.username == username)
                 | (User.email == email)
             )
         ).first()
 
-        if existing:
-            error = "Username or email is already registered."
+        if existing_user:
+            error = "El nombre de usuario o el email ya están registrados."
 
     if error:
         return templates.TemplateResponse(
@@ -260,7 +267,7 @@ async def login_user(
         select(User).where(User.username == username.strip())
     ).first()
 
-    # Verifying the credentials is authentication, not authorization.
+    # Authentication: verify the credentials before authorization.
     if (
         not user
         or not user.hashed_password
@@ -269,12 +276,11 @@ async def login_user(
         return templates.TemplateResponse(
             request=request,
             name="users/login.html",
-            context={"error": "Invalid username or password."},
+            context={"error": "Usuario o contraseña incorrectos."},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
-    # XACML decides whether this account is allowed to start a session.
-    # Banned or suspended accounts receive 403 from enforce().
+    # XACML decides whether this account may start a session.
     enforce(user, "login", "user", login_attrs(user))
 
     request.session.clear()
@@ -288,7 +294,7 @@ async def login_user(
 
 @router.get("/logout")
 async def logout(request: Request):
-    # Ending one's own session does not require an authorization decision.
+    """End the current user's session."""
     request.session.clear()
 
     return RedirectResponse(
@@ -308,7 +314,7 @@ async def profile_page(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    # XACML decides whether the user may read their own personal data.
+    """Display the profile with decrypted delivery information."""
     enforce(
         current_user,
         "read",
@@ -316,25 +322,10 @@ async def profile_page(
         user_pii_attrs(current_user),
     )
 
-    pii = {
-        field: decrypt_pii(getattr(current_user, field))
-        for field in PII_FIELDS
-    """Display profile page with decrypted PII delivery info for the user."""
-    #decrypt sensitive fields
-    user_data = {
-        **current_user.model_dump(),
-        "delivery_address_line1": decrypt_pii(current_user.delivery_address_line1),
-        "delivery_address_line2": decrypt_pii(current_user.delivery_address_line2),
-        "postal_code": decrypt_pii(current_user.postal_code),
-        "city": decrypt_pii(current_user.city),
-        "country": decrypt_pii(current_user.country),
-        "phone_number": decrypt_pii(current_user.phone_number),
-    } }
-
     petition = _latest_mod_petition(session, current_user.id)
 
     context = {
-        "user": _profile_view(current_user, pii),
+        "user": _profile_view(current_user, _decrypted_pii(current_user)),
         "petition": petition,
         "has_mod_petition": petition is not None,
     }
@@ -364,7 +355,7 @@ async def update_profile(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    # XACML decides whether the user may update their personal data.
+    """Update email, delivery details and optionally the password."""
     enforce(
         current_user,
         "update",
@@ -375,47 +366,45 @@ async def update_profile(
     email = email.strip().lower()
     new_password = password if password and password.strip() else None
 
-    if password and password.strip():
-        if (
-              len(password) < 8
-              or not re.search(r"[A-Z]", password)
-              or not re.search(r"[0-9]", password)
-              or not re.search(r"[\W_]", password)
-            ):
-                return templates.TemplateResponse(
-                    request,
-                    "users/profile.html",
-                    {
-                        "error": (
-                            "Password must be at least 8 characters long and include an"
-                            " uppercase letter, a number, and a special character."
-                        ),
-                        "user": current_user,
-                    },
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-        
-        current_user.hashed_password = hash_password(password)
-
-    session.add(current_user)
-    session.commit()
-    session.refresh(current_user)
-
-    # Prepare decrypted user view for template response
-    user_data = {
-        **current_user.model_dump(),
-        "delivery_address_line1": address_line1,
-        "delivery_address_line2": address_line2,
-        "postal_code": postal_code,
-        "city": city,
-        "country": country,
-        "phone_number": phone_number,
+    submitted_pii = {
+        "delivery_address_line1": (address_line1 or "").strip() or None,
+        "delivery_address_line2": (address_line2 or "").strip() or None,
+        "postal_code": (postal_code or "").strip() or None,
+        "city": (city or "").strip() or None,
+        "country": (country or "").strip() or None,
+        "phone_number": (phone_number or "").strip() or None,
     }
 
     email_changed = email != current_user.email
+    password_changed = new_password is not None
 
-    # Changing email or password requires the current password.
-    if (email_changed or new_password) and current_user.hashed_password:
+    # Validate before modifying or committing the user.
+    if not email or "@" not in email:
+        return _render_profile_error(
+            request,
+            current_user,
+            session,
+            "Introduce un email válido.",
+            submitted_pii,
+            email,
+        )
+
+    if password_changed and not _valid_password(new_password):
+        return _render_profile_error(
+            request,
+            current_user,
+            session,
+            (
+                "La contraseña debe tener al menos 8 caracteres e incluir "
+                "una mayúscula, un número y un carácter especial."
+            ),
+            submitted_pii,
+            email,
+        )
+
+    # Changing email or password requires the existing password when the
+    # account already has one. Verify BEFORE replacing the stored hash.
+    if (email_changed or password_changed) and current_user.hashed_password:
         if (
             not current_password
             or not verify_password(
@@ -429,28 +418,8 @@ async def update_profile(
                 session,
                 "Confirma tu contraseña actual para cambiar el email o la contraseña.",
                 submitted_pii,
+                email,
             )
-
-    if "@" not in email:
-        return _render_profile_error(
-            request,
-            current_user,
-            session,
-            "Email no válido.",
-            submitted_pii,
-        )
-
-    if new_password and len(new_password) < MIN_PASSWORD_LENGTH:
-        return _render_profile_error(
-            request,
-            current_user,
-            session,
-            (
-                f"La contraseña debe tener al menos "
-                f"{MIN_PASSWORD_LENGTH} caracteres."
-            ),
-            submitted_pii,
-        )
 
     if email_changed:
         taken = session.exec(
@@ -465,24 +434,23 @@ async def update_profile(
                 request,
                 current_user,
                 session,
-                "Email no disponible.",
+                "Ese email ya está registrado.",
                 submitted_pii,
+                email,
             )
 
-        current_user.email = email
-
-    if new_password:
-        current_user.hashed_password = hash_password(new_password)
-
+    # Encrypt PII before saving it to the database.
     for field, value in submitted_pii.items():
-        setattr(
-            current_user,
-            field,
-            encrypt_pii((value or "").strip() or None),
-        )
+        setattr(current_user, field, encrypt_pii(value))
+
+    current_user.email = email
+
+    if password_changed:
+        current_user.hashed_password = hash_password(new_password)
 
     session.add(current_user)
     session.commit()
+    session.refresh(current_user)
 
     return RedirectResponse(
         url="/users/profile?updated=true",
@@ -517,11 +485,9 @@ async def mod_petition_page(
         request=request,
         name="users/mod_petition.html",
         context={
-            "user": _profile_view(current_user),
+            "user": _profile_view(current_user, _decrypted_pii(current_user)),
             "petition": existing_petition,
-            "cancelled": (
-                request.query_params.get("cancelled") == "true"
-            ),
+            "cancelled": request.query_params.get("cancelled") == "true",
         },
     )
 
@@ -533,8 +499,7 @@ async def submit_mod_petition(
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
-    # XACML decides whether this subject may submit an application.
-    # The "user" role check lives in the policy, not in this function.
+    # The policy determines whether this subject may submit an application.
     enforce(
         current_user,
         "create",
@@ -547,17 +512,14 @@ async def submit_mod_petition(
         current_user.id,
     )
 
-    # Business rule: do not allow a second application while one is pending.
     if existing_petition and not existing_petition.Reviewed:
         return templates.TemplateResponse(
             request=request,
             name="users/mod_petition.html",
             context={
-                "user": _profile_view(current_user),
+                "user": _profile_view(current_user, _decrypted_pii(current_user)),
                 "petition": existing_petition,
-                "error": (
-                    "You already have a pending moderator application."
-                ),
+                "error": "Ya tienes una solicitud de moderador pendiente.",
             },
             status_code=status.HTTP_409_CONFLICT,
         )
@@ -569,11 +531,9 @@ async def submit_mod_petition(
             request=request,
             name="users/mod_petition.html",
             context={
-                "user": _profile_view(current_user),
+                "user": _profile_view(current_user, _decrypted_pii(current_user)),
                 "petition": existing_petition,
-                "error": (
-                    "Please provide a message explaining your application."
-                ),
+                "error": "Explica por qué solicitas ser moderador.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -599,7 +559,7 @@ async def cancel_mod_petition(
 ):
     petition = _latest_mod_petition(session, current_user.id)
 
-    # Authorize first, so the response does not reveal whether a petition exists.
+    # Authorize first so the response does not reveal whether a petition exists.
     enforce(
         current_user,
         "delete",
@@ -613,7 +573,6 @@ async def cancel_mod_petition(
             detail="Moderator application not found.",
         )
 
-    # Business rule: a reviewed application cannot be cancelled.
     if petition.Reviewed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -649,16 +608,16 @@ async def delete_account(
     )
 
     if current_user.hashed_password:
-        if not password or not verify_password(
-            password,
-            current_user.hashed_password,
+        if (
+            not password
+            or not verify_password(password, current_user.hashed_password)
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Incorrect password",
+                detail="Contraseña incorrecta.",
             )
 
-    # Remove reports where the user is either the target or the reporter.
+    # Delete reports where the user is the target or the reporter.
     session.exec(
         delete(UserReport).where(
             (UserReport.target_user_id == current_user.id)
@@ -691,8 +650,7 @@ async def public_profile(
 ):
     profile_user = session.get(User, user_id)
 
-    # Same 404 whether the user does not exist or the viewer may not see it,
-    # so the endpoint cannot be used to enumerate accounts.
+    # Same 404 whether the user does not exist or the viewer may not see it.
     if not profile_user or not can(
         current_user,
         "read",
@@ -708,7 +666,6 @@ async def public_profile(
         select(Item).where(Item.seller_id == profile_user.id)
     ).all()
 
-    # XACML decides which of the seller's items the visitor may see.
     items = [
         item
         for item in all_seller_items
@@ -720,7 +677,7 @@ async def public_profile(
         )
     ]
 
-    # Public DTO: no email, personal data or hash.
+    # Public DTO: no email, personal data or password hash.
     public_view = {
         "id": profile_user.id,
         "username": profile_user.username,
@@ -734,9 +691,7 @@ async def public_profile(
             "user": current_user,
             "profile_user": public_view,
             "items": items,
-            "reported_success": (
-                request.query_params.get("reported") == "true"
-            ),
+            "reported_success": request.query_params.get("reported") == "true",
         },
     )
 
@@ -756,8 +711,10 @@ async def report_user(
             detail="User not found",
         )
 
-    # Authorize first, so the response does not reveal the target's state.
-    report_attrs = report_create_attrs(target_user.id, role_of(target_user))
+    report_attrs = report_create_attrs(
+        target_user.id,
+        role_of(target_user),
+    )
 
     enforce(
         current_user,
@@ -774,7 +731,6 @@ async def report_user(
             detail="Please provide a reason for the report.",
         )
 
-    # XACML decides whether this report is escalated straight to admins.
     escalated = can(
         current_user,
         "create_escalated",
@@ -797,7 +753,6 @@ async def report_user(
 
     session.add(new_report)
 
-    # Only block the target account if the policy allows escalation.
     if escalated:
         target_user.is_blacklisted = True
         session.add(target_user)
