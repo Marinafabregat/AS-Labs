@@ -1,107 +1,91 @@
-from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 from passlib.context import CryptContext
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from casbin_enforcer import casbin_enforcer
-from db import engine, get_session
-from models import User, UserRole
+from authz import account_attrs, can, enforce
+from db import get_session
+from models import User
 
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+# Kept so that existing password hashes keep verifying.
+MAX_PASSWORD_BYTES = 72
+
 
 def hash_password(password: str) -> str:
-    password = password[:72]
-    return pwd_context.hash(password)
+    return pwd_context.hash(password[:MAX_PASSWORD_BYTES])
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
-    password = password[:72]
-    return pwd_context.verify(password, hashed_password)
+    return pwd_context.verify(password[:MAX_PASSWORD_BYTES], hashed_password)
 
 
-def get_current_user(request: Request, session: Session = Depends(get_session)) -> User:
-    user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
-        )
+def _session_user_id(request: Request) -> Optional[UUID]:
+    """Return the user id stored in the session, or None if it is missing or malformed."""
+    raw = request.session.get("user_id")
+
+    if not raw:
+        return None
+
     try:
-        user_uuid = UUID(user_id)
-    except Exception:
+        return UUID(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_current_user(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> User:
+    """Authentication only: a valid session must point to an existing user."""
+    user_id = _session_user_id(request)
+
+    if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user session"
+            detail="Not authenticated",
         )
 
-    user = session.get(User, user_uuid)
-    if not user:
+    user = session.get(User, user_id)
+
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            detail="User not found",
         )
+
     return user
 
 
-def get_current_user_optional(request: Request, session: Session = Depends(get_session)) -> Optional[User]:
-    user_id = request.session.get("user_id")
-    if not user_id:
+def get_current_user_optional(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> Optional[User]:
+    """
+    An account that XACML does not allow to use the application (banned or
+    suspended) is treated as anonymous on public pages.
+    """
+    user_id = _session_user_id(request)
+
+    if user_id is None:
         return None
-    try:
-        user_uuid = UUID(user_id)
-    except Exception:
+
+    user = session.get(User, user_id)
+
+    if user is None:
         return None
-    user = session.get(User, user_uuid)
+
+    # XACML decides whether this account may act at all.
+    if not can(user, "session", "account", account_attrs(user)):
+        return None
+
     return user
 
 
 def get_current_active_user(user: User = Depends(get_current_user)) -> User:
-    if user.is_banned:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been permanently banned. Access denied."
-        )
-    if user.is_blacklisted:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is temporarily suspended pending admin review."
-        )
-    return user
-
-
-def require_permission(resource: str, action: str):
-    def dependency(user: User = Depends(get_current_active_user)) -> User:
-        if not casbin_enforcer.enforce(user.role.value, resource, action):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {action} on {resource}"
-            )
-        return user
-    return dependency
-
-
-require_admin = require_permission("*", "*")
-require_moderator = require_permission("item", "report")
-
-
-def require_admin_user(user: User = Depends(get_current_active_user)) -> User:
-    if user.role != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required."
-        )
-    return user
-
-
-def require_moderator_user(user: User = Depends(get_current_active_user)) -> User:
-    if user.role not in [UserRole.MODERATOR, UserRole.ADMIN]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Moderator privileges required."
-        )
+    enforce(user, "session", "account", account_attrs(user))
     return user

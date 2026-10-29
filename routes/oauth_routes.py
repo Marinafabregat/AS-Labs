@@ -1,93 +1,126 @@
+import logging
 import os
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
-from auth import get_current_active_user, get_session
+
+from auth import get_current_active_user
+from authz import can, enforce, login_attrs, user_pii_attrs
+from db import get_session
 from models import User
 from oauth import oauth
 from security_encryption import encrypt_secret
 from template_context import templates
 
+
+log = logging.getLogger("oauth")
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
+# Generic on purpose: XACML returns Permit or Deny, not the reason.
+LOGIN_DENIED_MESSAGE = (
+    "Access to this account is restricted. Contact an administrator."
+)
 
-def _blacklist_denied(request: Request, user: User):
-    if user.is_banned:
-        message = "Account permanently banned. Access denied."
-    else:
-        message = "Account temporarily suspended pending admin review."
+
+def _may_login(user: User) -> bool:
+    """Ask XACML whether this account may start a session."""
+    return can(user, "login", "user", login_attrs(user))
+
+
+def _login_denied(request: Request):
     return templates.TemplateResponse(
-        request,
-        "auth/login.html",
-        {"error": message},
+        request=request,
+        name="auth/login.html",
+        context={"error": LOGIN_DENIED_MESSAGE},
         status_code=status.HTTP_403_FORBIDDEN,
     )
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Show login page with both Google OAuth and password options."""
-    return templates.TemplateResponse(request, "auth/login.html")
+    return templates.TemplateResponse(
+        request=request,
+        name="auth/login.html",
+    )
 
 
 @router.get("/google")
 async def google_login(request: Request):
-    """Redirect to Google OAuth."""
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or str(request.url_for("google_callback"))
+    # Starts the OAuth redirect. It exposes no data; the decision happens
+    # in the callback, once the Google identity is known.
+    redirect_uri = (
+        os.getenv("GOOGLE_REDIRECT_URI")
+        or str(request.url_for("google_callback"))
+    )
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
 @router.get("/callback")
-async def google_callback(request: Request, session: Session = Depends(get_session)):
-    """Handle Google OAuth callback."""
+async def google_callback(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    # Identity verification (token and email) is authentication, so it stays here.
     try:
         token = await oauth.google.authorize_access_token(request)
-    except Exception as e:
+    except Exception as exc:
+        log.warning("OAuth error: %s", exc)
         return templates.TemplateResponse(
-            request,
-            "auth/login.html",
-            {"error": f"OAuth error: {str(e)}"},
+            request=request,
+            name="auth/login.html",
+            context={"error": "No se pudo completar el inicio de sesión con Google."},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     userinfo = token.get("userinfo")
+
     if not userinfo:
         userinfo = await oauth.google.parse_id_token(request, token)
 
     if not userinfo or "email" not in userinfo:
         return templates.TemplateResponse(
-            request,
-            "auth/login.html",
-            {"error": "Could not retrieve user info from Google"},
+            request=request,
+            name="auth/login.html",
+            context={"error": "Could not retrieve user info from Google"},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    email = userinfo["email"]
+    # An unverified Google email must not be linked to an existing account.
+    if not userinfo.get("email_verified", False):
+        return templates.TemplateResponse(
+            request=request,
+            name="auth/login.html",
+            context={"error": "Tu cuenta de Google no tiene el email verificado."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    email = userinfo["email"].strip().lower()
     oauth_id = userinfo["sub"]
 
-    # Check if user exists with this OAuth ID
+    # Case 1: a known Google identity.
     user = session.exec(select(User).where(User.oauth_id == oauth_id)).first()
 
     if user:
-        if user.is_blacklisted or user.is_banned:
-            return _blacklist_denied(request, user)
-        # Update tokens (encrypted at rest)
+        if not _may_login(user):
+            return _login_denied(request)
+
         user.oauth_access_token = encrypt_secret(token.get("access_token"))
         user.oauth_refresh_token = encrypt_secret(token.get("refresh_token"))
         session.add(user)
         session.commit()
-        session.refresh(user)
+
+        request.session.clear()
         request.session["user_id"] = str(user.id)
         return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
-    # Check if user exists with this email (for linking)
+    # Case 2: an existing account with the same email. Linking needs confirmation.
     existing_user = session.exec(select(User).where(User.email == email)).first()
 
     if existing_user:
-        if existing_user.is_blacklisted or existing_user.is_banned:
-            return _blacklist_denied(request, existing_user)
-        # Store OAuth info in session for linking confirmation
+        if not _may_login(existing_user):
+            return _login_denied(request)
+
         request.session["pending_oauth_link"] = {
             "email": email,
             "oauth_id": oauth_id,
@@ -98,10 +131,13 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
         }
         return RedirectResponse(url="/auth/link", status_code=status.HTTP_302_FOUND)
 
-    # Create new OAuth-only user
-    username_base = email.split("@")[0]
+    # Case 3: a new account. Registration is an anonymous "create" decision.
+    enforce(None, "create", "user", {})
+
+    username_base = email.split("@")[0][:40]
     username = username_base
     counter = 1
+
     while session.exec(select(User).where(User.username == username)).first():
         username = f"{username_base}{counter}"
         counter += 1
@@ -119,70 +155,114 @@ async def google_callback(request: Request, session: Session = Depends(get_sessi
     session.commit()
     session.refresh(user)
 
+    request.session.clear()
     request.session["user_id"] = str(user.id)
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/link", response_class=HTMLResponse)
 async def link_account_page(request: Request):
-    """Show account linking confirmation page."""
+    # Shows only the pending link data stored in this visitor's own session.
     oauth_data = request.session.get("pending_oauth_link")
+
     if not oauth_data:
         return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(request, "auth/link.html", {"oauth_data": oauth_data})
+
+    return templates.TemplateResponse(
+        request=request,
+        name="auth/link.html",
+        context={"oauth_data": oauth_data},
+    )
 
 
 @router.get("/cancel")
 async def cancel_link(request: Request):
-    """Discard a pending Google account link and return to login."""
     request.session.pop("pending_oauth_link", None)
     return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
 
 
 @router.post("/link")
-async def link_account_confirm(request: Request, session: Session = Depends(get_session)):
-    """Confirm linking Google account to existing user."""
-    oauth_data = request.session.get("pending_oauth_link")
+async def link_account_confirm(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    oauth_data = request.session.pop("pending_oauth_link", None)
+
     if not oauth_data:
         return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
 
-    email = oauth_data["email"]
-    user = session.exec(select(User).where(User.email == email)).first()
+    user = session.exec(
+        select(User).where(User.email == oauth_data["email"])
+    ).first()
 
-    if user and (user.is_blacklisted or user.is_banned):
-        request.session.pop("pending_oauth_link", None)
-        return _blacklist_denied(request, user)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
 
-    if user:
-        user.oauth_provider = "google"
-        user.oauth_id = oauth_data["oauth_id"]
-        # Tokens are already encrypted when stored in the pending link session
-        user.oauth_access_token = oauth_data["access_token"]
-        user.oauth_refresh_token = oauth_data["refresh_token"]
-        if not user.username:
-            user.username = oauth_data["name"] or email.split("@")[0]
-        session.add(user)
-        session.commit()
-        session.refresh(user)
+    # Linking ends in a session, so it requires the same "login" decision.
+    if not _may_login(user):
+        return _login_denied(request)
 
-    request.session.pop("pending_oauth_link", None)
+    # Data integrity: one Google identity can be linked to one account only.
+    other = session.exec(
+        select(User).where(
+            User.oauth_id == oauth_data["oauth_id"],
+            User.id != user.id,
+        )
+    ).first()
+
+    if other:
+        return templates.TemplateResponse(
+            request=request,
+            name="auth/login.html",
+            context={"error": "Esta cuenta de Google ya está vinculada a otro usuario."},
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+    user.oauth_provider = "google"
+    user.oauth_id = oauth_data["oauth_id"]
+    # Tokens were already encrypted in the callback.
+    user.oauth_access_token = oauth_data["access_token"]
+    user.oauth_refresh_token = oauth_data["refresh_token"]
+
+    if not user.username:
+        user.username = oauth_data["name"] or oauth_data["email"].split("@")[0]
+
+    session.add(user)
+    session.commit()
+
+    request.session.clear()
     request.session["user_id"] = str(user.id)
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
 
-@router.get("/unlink")
-async def unlink_google(request: Request, current_user: User = Depends(get_current_active_user), session: Session = Depends(get_session)):
-    """Unlink Google account from current user."""
-    if current_user.oauth_provider == "google" and current_user.hashed_password is None:
+@router.post("/unlink")
+async def unlink_google(
+    current_user: User = Depends(get_current_active_user),
+    session: Session = Depends(get_session),
+):
+    # Changing one's own linked identity is an owner-only decision.
+    enforce(
+        current_user,
+        "update",
+        "user_pii",
+        user_pii_attrs(current_user),
+    )
+
+    if current_user.oauth_provider is None:
+        return RedirectResponse(url="/users/profile", status_code=status.HTTP_302_FOUND)
+
+    # Business rule: without a password the account would become unreachable.
+    if current_user.hashed_password is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot unlink Google: no password set for account"
+            detail="No puedes desvincular Google: la cuenta no tiene contraseña.",
         )
 
     current_user.oauth_provider = None
     current_user.oauth_id = None
     current_user.oauth_access_token = None
     current_user.oauth_refresh_token = None
+
     session.add(current_user)
     session.commit()
 
@@ -191,6 +271,6 @@ async def unlink_google(request: Request, current_user: User = Depends(get_curre
 
 @router.get("/logout")
 async def logout(request: Request):
-    """Clear session and redirect to home."""
+    # Ending one's own session needs no authorization decision.
     request.session.clear()
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
