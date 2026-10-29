@@ -216,7 +216,7 @@
 
         </div>
      
-    {% if user and not missing_address_error and not item.is_blacklisted and not is_purchased %}    
+    {% if user and not missing_address_error and not item.is_blacklisted and not is_purchased and not is_owner%}    
     <!-- TODO ADD LOGIC SO CAT DOESNT ALWAYS SHOW -->
     <div id="shopping-cat" style="position: fixed; bottom: 5rem; right: 4.5rem; z-index: 99999; pointer-events: none; transition: all 1s ease-in-out;">
         <div id="cat-sprite" class="cat-idle" style="width: 64px; height: 64px; background-repeat: no-repeat;"></div>
