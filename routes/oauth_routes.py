@@ -1,11 +1,12 @@
 import logging
 import os
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
 
-from auth import get_current_active_user
+from auth import get_current_active_user, get_current_user_optional
 from authz import can, enforce, login_attrs, user_pii_attrs
 from db import get_session
 from models import User
@@ -37,6 +38,16 @@ def _login_denied(request: Request):
     )
 
 
+def _profile_link_redirect(error: Optional[str] = None):
+    """Return to the user panel, optionally reporting a link error code."""
+    url = "/users/profile"
+
+    if error:
+        url = f"{url}?link_error={error}"
+
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(
@@ -56,16 +67,55 @@ async def google_login(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
+@router.get("/google/link")
+async def google_link(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+):
+    # Linking is only possible from an authenticated panel session.
+    enforce(
+        current_user,
+        "update",
+        "user_pii",
+        user_pii_attrs(current_user),
+    )
+
+    if current_user.oauth_provider == "google":
+        return RedirectResponse(url="/users/profile", status_code=status.HTTP_302_FOUND)
+
+    # The callback uses this flag to link instead of starting a new login.
+    request.session["oauth_link_user_id"] = str(current_user.id)
+
+    redirect_uri = (
+        os.getenv("GOOGLE_REDIRECT_URI")
+        or str(request.url_for("google_callback"))
+    )
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
 @router.get("/callback")
 async def google_callback(
     request: Request,
     session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    # The intent is single-use: remove it even if the exchange fails.
+    link_user_id = request.session.pop("oauth_link_user_id", None)
+    is_link = link_user_id is not None
+
+    # A link request only makes sense for the account that started it.
+    if is_link and (
+        current_user is None or str(current_user.id) != link_user_id
+    ):
+        return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
+
     # Identity verification (token and email) is authentication, so it stays here.
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as exc:
         log.warning("OAuth error: %s", exc)
+        if is_link:
+            return _profile_link_redirect("oauth_error")
         return templates.TemplateResponse(
             request=request,
             name="auth/login.html",
@@ -79,6 +129,8 @@ async def google_callback(
         userinfo = await oauth.google.parse_id_token(request, token)
 
     if not userinfo or "email" not in userinfo:
+        if is_link:
+            return _profile_link_redirect("oauth_error")
         return templates.TemplateResponse(
             request=request,
             name="auth/login.html",
@@ -88,6 +140,8 @@ async def google_callback(
 
     # An unverified Google email must not be linked to an existing account.
     if not userinfo.get("email_verified", False):
+        if is_link:
+            return _profile_link_redirect("email_not_verified")
         return templates.TemplateResponse(
             request=request,
             name="auth/login.html",
@@ -97,6 +151,42 @@ async def google_callback(
 
     email = userinfo["email"].strip().lower()
     oauth_id = userinfo["sub"]
+
+    # Linking started from the user panel: only for the same email.
+    if is_link:
+        enforce(
+            current_user,
+            "update",
+            "user_pii",
+            user_pii_attrs(current_user),
+        )
+
+        if email != current_user.email.strip().lower():
+            return _profile_link_redirect("email_mismatch")
+
+        # Data integrity: one Google identity can be linked to one account only.
+        other = session.exec(
+            select(User).where(
+                User.oauth_id == oauth_id,
+                User.id != current_user.id,
+            )
+        ).first()
+
+        if other:
+            return _profile_link_redirect("already_linked")
+
+        current_user.oauth_provider = "google"
+        current_user.oauth_id = oauth_id
+        current_user.oauth_access_token = encrypt_secret(token.get("access_token"))
+        current_user.oauth_refresh_token = encrypt_secret(token.get("refresh_token"))
+
+        session.add(current_user)
+        session.commit()
+
+        return RedirectResponse(
+            url="/users/profile?linked=true",
+            status_code=status.HTTP_302_FOUND,
+        )
 
     # Case 1: a known Google identity.
     user = session.exec(select(User).where(User.oauth_id == oauth_id)).first()
@@ -114,22 +204,22 @@ async def google_callback(
         request.session["user_id"] = str(user.id)
         return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
-    # Case 2: an existing account with the same email. Linking needs confirmation.
+    # Case 2: an existing account with the same email. Linking is only allowed
+    # from the authenticated user panel, so do not link here.
     existing_user = session.exec(select(User).where(User.email == email)).first()
 
     if existing_user:
-        if not _may_login(existing_user):
-            return _login_denied(request)
-
-        request.session["pending_oauth_link"] = {
-            "email": email,
-            "oauth_id": oauth_id,
-            "access_token": encrypt_secret(token.get("access_token")),
-            "refresh_token": encrypt_secret(token.get("refresh_token")),
-            "name": userinfo.get("name", ""),
-            "picture": userinfo.get("picture", ""),
-        }
-        return RedirectResponse(url="/auth/link", status_code=status.HTTP_302_FOUND)
+        return templates.TemplateResponse(
+            request=request,
+            name="auth/login.html",
+            context={
+                "error": (
+                    "Ya existe una cuenta con este email. Inicia sesión con "
+                    "tu contraseña y vincula Google desde tu perfil."
+                )
+            },
+            status_code=status.HTTP_409_CONFLICT,
+        )
 
     # Case 3: a new account. Registration is an anonymous "create" decision.
     enforce(None, "create", "user", {})
@@ -154,81 +244,6 @@ async def google_callback(
     session.add(user)
     session.commit()
     session.refresh(user)
-
-    request.session.clear()
-    request.session["user_id"] = str(user.id)
-    return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
-
-
-@router.get("/link", response_class=HTMLResponse)
-async def link_account_page(request: Request):
-    # Shows only the pending link data stored in this visitor's own session.
-    oauth_data = request.session.get("pending_oauth_link")
-
-    if not oauth_data:
-        return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="auth/link.html",
-        context={"oauth_data": oauth_data},
-    )
-
-
-@router.get("/cancel")
-async def cancel_link(request: Request):
-    request.session.pop("pending_oauth_link", None)
-    return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
-
-
-@router.post("/link")
-async def link_account_confirm(
-    request: Request,
-    session: Session = Depends(get_session),
-):
-    oauth_data = request.session.pop("pending_oauth_link", None)
-
-    if not oauth_data:
-        return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
-
-    user = session.exec(
-        select(User).where(User.email == oauth_data["email"])
-    ).first()
-
-    if not user:
-        return RedirectResponse(url="/auth/login", status_code=status.HTTP_302_FOUND)
-
-    # Linking ends in a session, so it requires the same "login" decision.
-    if not _may_login(user):
-        return _login_denied(request)
-
-    # Data integrity: one Google identity can be linked to one account only.
-    other = session.exec(
-        select(User).where(
-            User.oauth_id == oauth_data["oauth_id"],
-            User.id != user.id,
-        )
-    ).first()
-
-    if other:
-        return templates.TemplateResponse(
-            request=request,
-            name="auth/login.html",
-            context={"error": "Esta cuenta de Google ya está vinculada a otro usuario."},
-            status_code=status.HTTP_409_CONFLICT,
-        )
-
-    user.oauth_provider = "google"
-    user.oauth_id = oauth_data["oauth_id"]
-    # Tokens were already encrypted in the callback.
-    user.oauth_access_token = oauth_data["access_token"]
-    user.oauth_refresh_token = oauth_data["refresh_token"]
-
-    if not user.username:
-        user.username = oauth_data["name"] or oauth_data["email"].split("@")[0]
-
-    session.add(user)
-    session.commit()
 
     request.session.clear()
     request.session["user_id"] = str(user.id)
