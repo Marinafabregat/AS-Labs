@@ -173,7 +173,7 @@
                     <label for="message" class="block text-sm font-semibold text-slate-700 mb-2">
                         Why would you like to become a moderator?
                     </label>
-
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <textarea
                         id="message"
                         name="message"
@@ -219,7 +219,7 @@
                     <label for="message" class="block text-sm font-semibold text-slate-700 mb-2">
                         Why would you like to become a moderator?
                     </label>
-
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <textarea
                         id="message"
                         name="message"

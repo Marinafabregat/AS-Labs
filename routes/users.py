@@ -18,6 +18,8 @@ from auth import (
     get_current_user_optional,
     hash_password,
     verify_password,
+    get_or_create_csrf_token, 
+    verify_csrf,
 )
 from authz import (
     can,
@@ -332,6 +334,7 @@ async def profile_page(
         "user": _profile_view(current_user, _decrypted_pii(current_user)),
         "petition": petition,
         "has_mod_petition": petition is not None,
+        "csrf_token": get_or_create_csrf_token(request),
     }
 
     if request.query_params.get("updated") == "true":
@@ -364,10 +367,12 @@ async def update_profile(
     phone_number: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     current_password: Optional[str] = Form(None),
+    csrf_token: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
     """Update email, delivery details and optionally the password."""
+    verify_csrf(request, csrf_token)
     enforce(
         current_user,
         "update",
@@ -496,6 +501,7 @@ async def mod_petition_page(
             "user": _profile_view(current_user, _decrypted_pii(current_user)),
             "petition": existing_petition,
             "cancelled": request.query_params.get("cancelled") == "true",
+            "csrf_token": get_or_create_csrf_token(request),
         },
     )
 
@@ -504,6 +510,7 @@ async def mod_petition_page(
 async def submit_mod_petition(
     request: Request,
     message: str = Form(...),
+    csrf_token: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
@@ -519,6 +526,8 @@ async def submit_mod_petition(
         session,
         current_user.id,
     )
+    
+    verify_csrf(request, csrf_token)
 
     if existing_petition and not existing_petition.Reviewed:
         return templates.TemplateResponse(
@@ -562,11 +571,13 @@ async def submit_mod_petition(
 
 @router.post("/mod-petition/cancel")
 async def cancel_mod_petition(
+    request: Request,
+    csrf_token: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
 ):
     petition = _latest_mod_petition(session, current_user.id)
-
+    verify_csrf(request, csrf_token)
     # Authorize first so the response does not reveal whether a petition exists.
     enforce(
         current_user,
@@ -603,6 +614,7 @@ async def delete_account(
     password: Optional[str] = Form(None),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     enforce(
         current_user,
@@ -610,6 +622,7 @@ async def delete_account(
         "user_pii",
         user_pii_attrs(current_user),
     )
+    verify_csrf(request, csrf_token)
 
     if current_user.hashed_password:
         if (
@@ -698,13 +711,15 @@ async def public_profile(
 
 @router.post("/{user_id}/report")
 async def report_user(
+    request: Request,
     user_id: UUID,
     reason: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     target_user = session.get(User, user_id)
-
+    verify_csrf(request, csrf_token)
     if not target_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

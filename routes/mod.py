@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
-from auth import get_current_active_user
+from auth import get_current_active_user, get_or_create_csrf_token, verify_csrf 
 from authz import enforce, item_report_attrs, role_of, user_report_attrs
 from db import get_session
 from models import Item, ItemReport, ReportStatus, User, UserReport
@@ -165,6 +165,7 @@ async def moderator_reports_page(
             "user": current_user,
             "user_reports": user_reports,
             "item_reports": item_reports,
+            "csrf_token": get_or_create_csrf_token(request),
         },
     )
 
@@ -172,13 +173,15 @@ async def moderator_reports_page(
 
 @router.post("/moderator-reports/users/{report_id}/dismiss")
 async def dismiss_user_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_user_report(session, report_id)
     target_user = _load_target_user(session, report)
-
+    verify_csrf(request, csrf_token)
     # XACML checks conflict of interest and staff-target rules.
     enforce(
         current_user,
@@ -199,13 +202,15 @@ async def dismiss_user_report(
 
 @router.post("/moderator-reports/users/{report_id}/accept")
 async def accept_user_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_user_report(session, report_id)
     target_user = _load_target_user(session, report)
-
+    verify_csrf(request, csrf_token)
     enforce(
         current_user,
         "decide",
@@ -228,14 +233,16 @@ async def accept_user_report(
 
 @router.post("/moderator-reports/items/{report_id}/accept")
 async def accept_item_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_item_report(session, report_id)
     item = _load_item(session, report)
     seller = _load_seller(session, item)
-
+    verify_csrf(request, csrf_token)
     # Debug information to investigate the 403 permission error.
     print(
         "DEBUG MODERATOR ACCEPT:",
@@ -269,14 +276,16 @@ async def accept_item_report(
 
 @router.post("/moderator-reports/items/{report_id}/dismiss")
 async def dismiss_item_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...)
 ):
     report = _load_item_report(session, report_id)
     item = _load_item(session, report)
     seller = _load_seller(session, item)
-
+    verify_csrf(request, csrf_token)
     enforce(
         current_user,
         "decide",

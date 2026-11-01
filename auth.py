@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import UUID
-
+import secrets
 from fastapi import Depends, HTTPException, Request, status
 from passlib.context import CryptContext
 from sqlmodel import Session
@@ -89,3 +89,19 @@ def get_current_user_optional(
 def get_current_active_user(user: User = Depends(get_current_user)) -> User:
     enforce(user, "session", "account", account_attrs(user))
     return user
+
+def get_or_create_csrf_token(request: Request) -> str:
+    token = request.session.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(32)
+        request.session["csrf_token"] = token
+    return token
+
+def verify_csrf(request: Request, client_token: str):
+    """Verify that the client-submitted token matches the session token."""
+    session_token = request.session.get("csrf_token")
+    if not session_token or not client_token or not secrets.compare_digest(session_token, client_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF token missing or invalid.",
+        )

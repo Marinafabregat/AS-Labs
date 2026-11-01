@@ -17,7 +17,7 @@
         {% endif %}
 
         <form action="/items/create" method="POST" enctype="multipart/form-data" class="space-y-5">
-            
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <!-- Field: Title -->
             <div>
                 <label class="block text-sm font-semibold text-slate-700 mb-1">Product Title</label>

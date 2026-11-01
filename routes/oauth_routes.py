@@ -2,11 +2,11 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlmodel import Session, select
 
-from auth import get_current_active_user, get_current_user_optional
+from auth import get_current_active_user, get_current_user_optional, get_or_create_csrf_token, verify_csrf 
 from authz import can, enforce, login_attrs, user_pii_attrs
 from db import get_session
 from models import User
@@ -252,8 +252,10 @@ async def google_callback(
 
 @router.post("/unlink")
 async def unlink_google(
+    request: Request,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...)
 ):
     # Changing one's own linked identity is an owner-only decision.
     enforce(
@@ -262,6 +264,7 @@ async def unlink_google(
         "user_pii",
         user_pii_attrs(current_user),
     )
+    verify_csrf(request, csrf_token)
 
     if current_user.oauth_provider is None:
         return RedirectResponse(url="/users/profile", status_code=status.HTTP_302_FOUND)

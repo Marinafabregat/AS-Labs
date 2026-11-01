@@ -32,11 +32,13 @@
                 {% if report.status.value == 'pending' %}
                 <div class="flex flex-wrap gap-2 mt-4">
                     <form action="/mod/moderator-reports/users/{{ report.id }}/accept" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                             Accept
                         </button>
                     </form>
                     <form action="/mod/moderator-reports/users/{{ report.id }}/dismiss" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                             Reject
                         </button>
@@ -73,11 +75,13 @@
                 {% if report.status.value == 'pending' %}
                 <div class="flex flex-wrap gap-2 mt-4">
                     <form action="/mod/moderator-reports/items/{{ report.id }}/accept" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                             Accept
                         </button>
                     </form>
                     <form action="/mod/moderator-reports/items/{{ report.id }}/dismiss" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">
                             Reject
                         </button>

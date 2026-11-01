@@ -25,6 +25,7 @@
                 <span>Report this user</span>
             </summary>
             <form action="/users/{{ profile_user.id }}/report" method="POST" class="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="report-reason" class="block text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason for report</label>
                 <textarea id="report-reason" name="reason" rows="2" required placeholder="Describe why this user should be reported..."
                           class="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 focus:outline-none focus:border-rose-400"></textarea>

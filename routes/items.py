@@ -20,7 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from auth import get_current_active_user, get_current_user_optional
+from auth import get_current_active_user, get_current_user_optional, get_or_create_csrf_token, verify_csrf
 from authz import (
     can,
     enforce,
@@ -235,7 +235,8 @@ async def create_item_page(
     return templates.TemplateResponse(
         request=request,
         name="create_item.html",
-        context={"user": current_user, "categories": categories},
+        context={"user": current_user, "categories": categories, "csrf_token": get_or_create_csrf_token(request)},
+        
     )
 
 @router.post("/create")
@@ -248,10 +249,11 @@ async def create_item(
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     # Authorization happens before any file is read or stored.
     enforce(current_user, "create", "item", {})
-
+    verify_csrf(request, csrf_token)
     categories = session.exec(select(Category)).all()
     form_context = {"user": current_user, "categories": categories}
 
@@ -404,7 +406,8 @@ async def edit_item_page(
     return templates.TemplateResponse(
         request=request,
         name="edit_item.html",
-        context={"user": current_user, "item": item, "categories": categories},
+        context={"user": current_user, "item": item, "categories": categories, "csrf_token": get_or_create_csrf_token(request)},
+        
     )
 
 
@@ -419,10 +422,11 @@ async def edit_item(
     image: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     item = load_item_or_404(session, item_id)
     enforce(current_user, "update", "item", item_attrs(item))
-
+    verify_csrf(request, csrf_token)
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
@@ -485,13 +489,15 @@ async def edit_item(
 
 @router.post("/{item_id}/delete")
 async def delete_item(
+    request: Request,
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     item = load_item_or_404(session, item_id)
     enforce(current_user, "delete", "item", item_attrs(item))
-
+    verify_csrf(request, csrf_token)
     already_bought = session.exec(
         select(Purchase).where(Purchase.item_id == item_id)
     ).first()
@@ -523,13 +529,15 @@ async def delete_item(
 
 @router.post("/{item_id}/report")
 async def report_item(
+    request: Request,
     item_id: int,
     reason: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     item = load_item_or_404(session, item_id)
-
+    verify_csrf(request, csrf_token)
     seller = session.get(User, item.seller_id)
     if seller is None:
         raise HTTPException(status_code=404, detail="Seller not found")
@@ -637,6 +645,7 @@ async def item_detail(
             "missing_address_error": request.query_params.get("missing_address") == "true",
             "reported_success": request.query_params.get("reported") == "true",
             "bought_success": request.query_params.get("bought") == "true",
+            "csrf_token": get_or_create_csrf_token(request),
         },
     )
 
@@ -644,13 +653,15 @@ async def item_detail(
 
 @router.post("/{item_id}/like")
 async def toggle_like(
+    request: Request,
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...)
 ):
     item = load_item_or_404(session, item_id)
     enforce(current_user, "like", "item", item_attrs(item))
-
+    verify_csrf(request, csrf_token)
     existing_like = session.exec(
         select(Like).where(
             Like.user_id == current_user.id, Like.item_id == item_id
@@ -671,12 +682,14 @@ async def toggle_like(
 
 @router.post("/{item_id}/buy")
 async def buy_item(
+    request: Request,
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     item = load_item_or_404(session, item_id)
-
+    verify_csrf(request, csrf_token)
     # XACML covers hidden items and the seller buying their own item.
     enforce(current_user, "buy", "item", item_attrs(item))
 

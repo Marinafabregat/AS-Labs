@@ -1,11 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
-from auth import get_current_active_user
+from auth import get_current_active_user, get_or_create_csrf_token, verify_csrf
 from authz import (
     admin_target_attrs,
     enforce,
@@ -202,6 +202,7 @@ async def admin_reports_page(
             "user_reports": user_reports,
             "item_reports": item_reports,
             "banned_users": banned_users,
+            "csrf_token": get_or_create_csrf_token(request)
         },
     )
 
@@ -209,13 +210,15 @@ async def admin_reports_page(
 
 @router.post("/admin-reports/users/{report_id}/ban")
 async def admin_ban_user_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_user_report(session, report_id)
     target_user = _load_user(session, report.target_user_id)
-
+    verify_csrf(request, csrf_token)
     # 1. XACML decides whether this admin may act on the escalated report.
     enforce(
         current_user,
@@ -257,12 +260,15 @@ async def admin_ban_user_report(
 
 @router.post("/admin-reports/users/{report_id}/revert")
 async def admin_revert_user_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_user_report(session, report_id)
     target_user = _load_user(session, report.target_user_id)
+    verify_csrf(request, csrf_token)
 
     enforce(
         current_user,
@@ -307,12 +313,14 @@ async def admin_revert_user_report(
 
 @router.post("/admin-reports/users/{user_id}/unban")
 async def admin_unban_user(
+    request: Request,
     user_id: UUID,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     target_user = _load_user(session, user_id)
-
+    verify_csrf(request, csrf_token)
     # XACML decides first, so the response does not reveal the ban state.
     enforce(
         current_user,
@@ -350,13 +358,15 @@ async def admin_unban_user(
 
 @router.post("/mod-petitions/{petition_id}/approve")
 async def approve_mod_petition(
+    request: Request,
     petition_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     petition = _load_petition(session, petition_id)
     applicant = _load_user(session, petition.user_id)
-
+    verify_csrf(request, csrf_token)
     # XACML checks that this is an admin and that the applicant is a
     # regular user. The "applicant_role" attribute is what enforces that.
     enforce(
@@ -380,13 +390,15 @@ async def approve_mod_petition(
 
 @router.post("/mod-petitions/{petition_id}/reject")
 async def reject_mod_petition(
+    request: Request,
     petition_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     petition = _load_petition(session, petition_id)
     applicant = _load_user(session, petition.user_id)
-
+    verify_csrf(request, csrf_token)
     enforce(
         current_user,
         "review",
@@ -408,12 +420,14 @@ async def reject_mod_petition(
 
 @router.post("/admin-reports/users/{user_id}/delete")
 async def admin_delete_user(
+    request: Request,
     user_id: UUID,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     target_user = _load_user(session, user_id)
-
+    verify_csrf(request, csrf_token)
     # XACML denies admins from deleting their own account.
     enforce(
         current_user,
@@ -430,13 +444,16 @@ async def admin_delete_user(
 
 @router.post("/admin-reports/items/{report_id}/revert")
 async def admin_revert_item_report(
+    request: Request,
     report_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     report = _load_item_report(session, report_id)
     item = _load_item(session, report.item_id)
     seller = _load_seller(session, item)
+    verify_csrf(request, csrf_token)
 
     enforce(
         current_user,
@@ -468,12 +485,14 @@ async def admin_revert_item_report(
 
 @router.post("/admin-reports/items/{item_id}/delete")
 async def admin_delete_item(
+    request: Request,
     item_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_session),
+    csrf_token: str = Form(...),
 ):
     item = _load_item(session, item_id)
-
+    verify_csrf(request, csrf_token)
     enforce(
         current_user,
         "delete",

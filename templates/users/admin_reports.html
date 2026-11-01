@@ -51,6 +51,7 @@
                           data-confirm-message="The user {{ applicant.username }} will be promoted to moderator and gain moderator privileges."
                           data-confirm-button="Approve and promote"
                           data-confirm-style="success">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Approve and promote
@@ -63,6 +64,7 @@
                           data-confirm-message="The application from {{ applicant.username }} will be rejected."
                           data-confirm-button="Reject application"
                           data-confirm-style="danger">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Reject
@@ -137,6 +139,7 @@
                           data-confirm-message="The account {{ target.username }} will be permanently banned and blacklisted."
                           data-confirm-button="Ban permanently"
                           data-confirm-style="danger">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Ban permanently
@@ -149,6 +152,7 @@
                           data-confirm-message="The temporary blacklist for {{ target.username }} will be removed and the escalated reports dismissed."
                           data-confirm-button="Revert blacklist"
                           data-confirm-style="success">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Revert blacklist
@@ -162,6 +166,7 @@
                           data-confirm-message="The account {{ target.username }} will be deleted. This action cannot be undone."
                           data-confirm-button="Delete user"
                           data-confirm-style="danger">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Delete User
@@ -211,6 +216,7 @@
                               data-confirm-message="The permanent ban on {{ banned_user.username }} will be lifted."
                               data-confirm-button="Unban user"
                               data-confirm-style="success">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
                                     class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                                 Unban
@@ -223,6 +229,7 @@
                               data-confirm-message="The account {{ banned_user.username }} will be deleted. This action cannot be undone."
                               data-confirm-button="Delete user"
                               data-confirm-style="danger">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
                                     class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                                 Delete User
@@ -298,6 +305,7 @@
                           data-confirm-message="The temporary blacklist will be removed from '{{ item.title }}' and the escalated reports dismissed."
                           data-confirm-button="Restore listing"
                           data-confirm-style="success">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Revert blacklist
@@ -310,6 +318,7 @@
                           data-confirm-message="The listing '{{ item.title }}' will be permanently deleted. This action cannot be undone."
                           data-confirm-button="Delete listing"
                           data-confirm-style="danger">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit"
                                 class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
                             Delete Item
