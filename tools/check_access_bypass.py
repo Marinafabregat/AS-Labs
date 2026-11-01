@@ -23,9 +23,7 @@ ALLOWLIST = {
     "login_page",
     "register_page",
     "logout",
-    "cancel_link",
     "google_login",
-    "link_account_page",
 }
 
 # Status codes that represent an authorization decision.

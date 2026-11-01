@@ -10,7 +10,6 @@ env:
         # OAuth flow cannot be completed by ZAP without a real Google account.
         - "http://app:8000/auth/google.*"
         - "http://app:8000/auth/callback.*"
-        - "http://app:8000/auth/link.*"
         - "http://app:8000/auth/unlink.*"
         # Logout/delete endpoints would break the authenticated session mid-scan.
         - "http://app:8000/users/logout.*"

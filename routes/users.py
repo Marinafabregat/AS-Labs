@@ -57,6 +57,21 @@ MIN_PASSWORD_LENGTH = 8
 MAX_REASON_LENGTH = 500
 MAX_PETITION_MESSAGE_LENGTH = 1000
 
+LINK_ERROR_MESSAGES = {
+    "email_mismatch": (
+        "La cuenta de Google debe usar el mismo email que tu cuenta de VINSEC."
+    ),
+    "already_linked": (
+        "Esta cuenta de Google ya está vinculada a otro usuario."
+    ),
+    "email_not_verified": (
+        "Tu cuenta de Google no tiene el email verificado."
+    ),
+    "oauth_error": (
+        "No se pudo completar la vinculación con Google. Inténtalo de nuevo."
+    ),
+}
+
 
 def _role_value(user: User) -> str:
     """Return the role as a string."""
@@ -320,7 +335,15 @@ async def profile_page(
     }
 
     if request.query_params.get("updated") == "true":
-        context["success"] = "Profile updated successfully."
+        context["message"] = "Profile updated successfully."
+
+    if request.query_params.get("linked") == "true":
+        context["message"] = "Google account linked successfully."
+
+    link_error = request.query_params.get("link_error")
+
+    if link_error in LINK_ERROR_MESSAGES:
+        context["error"] = LINK_ERROR_MESSAGES[link_error]
 
     return templates.TemplateResponse(
         request=request,

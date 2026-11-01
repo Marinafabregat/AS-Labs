@@ -170,11 +170,12 @@
     {% endif %}
 
     <!-- Google Account -->
-    {% if user.oauth_provider == 'google' %}
     <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200
                 flex items-center justify-between gap-4">
         <div>
             <h3 class="font-bold text-slate-800 text-sm">Google Account</h3>
+
+            {% if user.oauth_provider == 'google' %}
             <p class="text-slate-500 text-xs mt-1">
                 Your account is linked to Google.
             </p>
@@ -184,24 +185,39 @@
                 Set a password below before unlinking Google.
             </p>
             {% endif %}
+            {% else %}
+            <p class="text-slate-500 text-xs mt-1">
+                Link your Google account to sign in with Google. The Google
+                email must match your account email.
+            </p>
+            {% endif %}
         </div>
 
-        {% if user.hashed_password %}
-        <a href="/auth/unlink"
-           onclick="return confirm('Unlink your Google account?');"
+        {% if user.oauth_provider == 'google' %}
+            {% if user.hashed_password %}
+            <form method="post" action="/auth/unlink"
+                  onsubmit="return confirm('Unlink your Google account?');">
+                <button type="submit"
+                        class="bg-slate-900 hover:bg-slate-800 text-white font-bold
+                               py-2 px-3.5 rounded-xl text-xs transition whitespace-nowrap">
+                    Unlink Google
+                </button>
+            </form>
+            {% else %}
+            <button type="button" disabled
+                    class="bg-slate-200 text-slate-500 font-bold py-2 px-3.5
+                           rounded-xl text-xs cursor-not-allowed whitespace-nowrap">
+                Unlink Google
+            </button>
+            {% endif %}
+        {% else %}
+        <a href="/auth/google/link"
            class="bg-slate-900 hover:bg-slate-800 text-white font-bold
                   py-2 px-3.5 rounded-xl text-xs transition whitespace-nowrap">
-            Unlink Google
+            Link Google
         </a>
-        {% else %}
-        <button type="button" disabled
-                class="bg-slate-200 text-slate-500 font-bold py-2 px-3.5
-                       rounded-xl text-xs cursor-not-allowed whitespace-nowrap">
-            Unlink Google
-        </button>
         {% endif %}
     </div>
-    {% endif %}
 
     <!-- Update Profile -->
     <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
