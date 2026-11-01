@@ -27,7 +27,6 @@ from models import (
 )
 from template_context import templates
 
-
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 ADMIN_REPORTS_URL = "/admin/admin-reports"

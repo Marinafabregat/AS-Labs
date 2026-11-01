@@ -34,7 +34,7 @@ from models import (
 )
 from routes import admin, items, mod, oauth_routes, users
 from template_context import templates
-
+from fastapi.responses import Response
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -210,6 +210,9 @@ app = FastAPI(
         "design principles in an online marketplace."
     ),
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 
@@ -330,3 +333,21 @@ async def general_exception_handler(
         },
         status_code=500,
     )
+
+#THIS IS TO ENSURE SECURITY HEADERS ARE PROPERLY INCLUDED
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response: Response = await call_next(request)
+    
+    response.headers["X-Frame-Options"] = "DENY"
+    
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
+        "style-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
+        "img-src 'self' data: https:;"
+    )
+    response.headers["X-Application"] = "vinsec"
+    return response

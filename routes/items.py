@@ -49,7 +49,6 @@ from models import (
 from security_encryption import decrypt_pii
 from template_context import templates
 
-
 router = APIRouter(prefix="/items", tags=["Items"])
 
 MAX_FILE_SIZE = 5 * 1024 * 1024

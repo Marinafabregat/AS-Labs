@@ -9,7 +9,6 @@ from db import get_session
 from models import Item, ItemReport, ReportStatus, User, UserReport
 from template_context import templates
 
-
 router = APIRouter(prefix="/mod", tags=["mod"])
 
 MOD_REPORTS_URL = "/mod/moderator-reports"

@@ -1,6 +1,7 @@
 from fastapi.security.oauth2 import OAuth2, OAuthFlowsModel
 from fastapi import Request, HTTPException, status
 from fastapi.security.utils import get_authorization_scheme_param
+
 from typing import Optional, Dict
 import logging
 
