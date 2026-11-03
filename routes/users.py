@@ -705,6 +705,7 @@ async def public_profile(
             "profile_user": public_view,
             "items": items,
             "reported_success": request.query_params.get("reported") == "true",
+            "csrf_token": get_or_create_csrf_token(request),
         },
     )
 

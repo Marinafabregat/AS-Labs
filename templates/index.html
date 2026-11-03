@@ -120,6 +120,7 @@
           <h3 class="font-bold text-slate-800 text-xs mb-1">Request Moderator Access</h3>
           <p class="text-slate-500 text-[11px] mb-2.5">Submit a petition to help moderate posts and handle user reports.</p>
           <form action="/users/mod-petition" method="post" class="space-y-2.5">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <textarea name="message" placeholder="Why would you like to become a moderator?" rows="2" 
                       class="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 transition" required></textarea>
             <button type="submit" class="bg-slate-800 hover:bg-slate-900 text-white font-semibold py-1.5 px-3.5 rounded-lg text-xs transition">

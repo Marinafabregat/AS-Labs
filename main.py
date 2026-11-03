@@ -19,7 +19,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from authz import can, item_attrs, init_authzforce
-from auth import get_current_user_optional, hash_password
+from auth import (
+    get_current_user_optional,
+    get_or_create_csrf_token,
+    hash_password,
+)
 from db import engine, get_session, init_db
 from image_storage import save_image, migrate_plaintext_uploads
 from models import (
@@ -281,6 +285,7 @@ async def index(
             "categories": categories,
             "items": visible_items,
             "user": user,
+            "csrf_token": get_or_create_csrf_token(request),
         },
     )
 
