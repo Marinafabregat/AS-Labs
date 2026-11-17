@@ -354,5 +354,7 @@ async def add_security_headers(request: Request, call_next):
         "style-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
         "img-src 'self' data: https:;"
     )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+
     response.headers["X-Application"] = "vinsec"
     return response
