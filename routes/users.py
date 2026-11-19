@@ -61,16 +61,16 @@ MAX_PETITION_MESSAGE_LENGTH = 1000
 
 LINK_ERROR_MESSAGES = {
     "email_mismatch": (
-        "La cuenta de Google debe usar el mismo email que tu cuenta de VINSEC."
+        "The Google account must use the same email as your VINSEC account."
     ),
     "already_linked": (
-        "Esta cuenta de Google ya está vinculada a otro usuario."
+        "This Google account is already linked to another user."
     ),
     "email_not_verified": (
-        "Tu cuenta de Google no tiene el email verificado."
+        "Your Google account email is not verified."
     ),
     "oauth_error": (
-        "No se pudo completar la vinculación con Google. Inténtalo de nuevo."
+        "Could not complete Google linking. Please try again."
     ),
 }
 

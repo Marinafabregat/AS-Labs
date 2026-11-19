@@ -861,5 +861,5 @@ def enforce(
     )
 
     if user is None:
-        raise HTTPException(status_code=401, detail="Debes iniciar sesión")
+        raise HTTPException(status_code=401, detail="You must be logged in")
     raise HTTPException(status_code=403, detail="Permission denied")

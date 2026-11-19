@@ -29,11 +29,11 @@ def _require_env_or_dev_default(name: str, default: str) -> str:
 
     if IN_DOCKER:
         raise RuntimeError(
-            f"{name} es obligatoria en Docker/producción"
+            f"{name} is required in Docker/production"
         )
 
     log.warning(
-        "%s no definida: usando clave de desarrollo INSEGURA",
+        "%s is not set: using an UNSAFE development key",
         name,
     )
     return default
@@ -50,7 +50,7 @@ try:
     fernet = Fernet(PII_KEY.encode("utf-8"))
 except (ValueError, TypeError) as exc:
     raise RuntimeError(
-        "PII_ENCRYPTION_KEY no es una clave Fernet válida"
+        "PII_ENCRYPTION_KEY is not a valid Fernet key"
     ) from exc
 
 
@@ -72,8 +72,8 @@ def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
         ).decode("utf-8")
     except (InvalidToken, ValueError, UnicodeDecodeError):
         log.error(
-            "No se pudo descifrar un campo PII "
-            "(clave incorrecta o dato corrupto)"
+            "Could not decrypt a PII field "
+            "(wrong key or corrupted data)"
         )
         return None
 
@@ -102,24 +102,24 @@ def _load_image_key() -> bytes:
             key = base64.b64decode(image_env, validate=True)
         except (ValueError, base64.binascii.Error) as exc:
             raise RuntimeError(
-                "IMAGE_ENCRYPTION_KEY debe estar codificada en Base64"
+                "IMAGE_ENCRYPTION_KEY must be Base64-encoded"
             ) from exc
     else:
         if IN_DOCKER:
             raise RuntimeError(
-                "IMAGE_ENCRYPTION_KEY es obligatoria en Docker/producción"
+                "IMAGE_ENCRYPTION_KEY is required in Docker/production"
             )
 
         log.warning(
-            "IMAGE_ENCRYPTION_KEY no definida: "
-            "usando clave de desarrollo INSEGURA"
+            "IMAGE_ENCRYPTION_KEY is not set: "
+            "using an UNSAFE development key"
         )
         key = bytes.fromhex(DEFAULT_IMAGE_KEY_HEX)
 
     if len(key) != 32:
         raise RuntimeError(
-            "IMAGE_ENCRYPTION_KEY debe representar exactamente "
-            "32 bytes para AES-256-GCM"
+            "IMAGE_ENCRYPTION_KEY must represent exactly "
+            "32 bytes for AES-256-GCM"
         )
 
     return key

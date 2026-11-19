@@ -60,7 +60,7 @@ def seed_default_data(engine):
     """Create the initial marketplace data."""
     with Session(engine) as session:
         if session.exec(select(User)).first():
-            log.info("Los datos iniciales ya existen.")
+            log.info("Initial data already exists.")
             return
 
         # Store the initial images encrypted.
@@ -178,7 +178,7 @@ def seed_default_data(engine):
         ])
 
         session.commit()
-        log.info("Datos iniciales del marketplace creados correctamente.")
+        log.info("Initial marketplace data created successfully.")
 
 
 @asynccontextmanager
@@ -190,17 +190,17 @@ async def lifespan(app: FastAPI):
     n = migrate_plaintext_uploads()
 
     if n:
-        log.info("Se han cifrado %s imágenes antiguas.", n)
+        log.info("Encrypted %s legacy images.", n)
     else:
-        log.info("No hay imágenes antiguas que necesiten cifrado.")
+        log.info("No legacy images need encryption.")
 
     if db_path.exists():
         log.info(
-            "La base de datos ya existe; se conservarán los datos actuales."
+            "The database already exists; current data will be preserved."
         )
         init_db()
     else:
-        log.info("No existe la base de datos; se creará con datos iniciales.")
+        log.info("The database does not exist; it will be created with initial data.")
         init_db()
         seed_default_data(engine)
 
@@ -225,13 +225,13 @@ SESSION_SECRET = os.getenv("SESSION_SECRET_KEY")
 if not SESSION_SECRET:
     if IN_DOCKER:
         raise RuntimeError(
-            "SESSION_SECRET_KEY es obligatoria en Docker/producción."
+            "SESSION_SECRET_KEY is required in Docker/production."
         )
 
     SESSION_SECRET = secrets.token_urlsafe(32)
     log.warning(
-        "SESSION_SECRET_KEY no definida: "
-        "se utiliza una clave temporal de desarrollo."
+        "SESSION_SECRET_KEY is not set: "
+        "using a temporary development key."
     )
 
 
@@ -316,7 +316,7 @@ async def validation_exception_handler(
         name="error.html",
         context={
             "status_code": 400,
-            "detail": "Datos de formulario no válidos",
+            "detail": "Invalid form data",
         },
         status_code=400,
     )
@@ -327,14 +327,14 @@ async def general_exception_handler(
     request: Request,
     exc: Exception,
 ):
-    log.exception("Error no controlado")
+    log.exception("Unhandled error")
 
     return templates.TemplateResponse(
         request=request,
         name="error.html",
         context={
             "status_code": 500,
-            "detail": "Error interno del servidor",
+            "detail": "Internal server error",
         },
         status_code=500,
     )

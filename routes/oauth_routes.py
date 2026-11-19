@@ -119,7 +119,7 @@ async def google_callback(
         return templates.TemplateResponse(
             request=request,
             name="auth/login.html",
-            context={"error": "No se pudo completar el inicio de sesión con Google."},
+            context={"error": "Could not complete Google sign-in."},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -145,7 +145,7 @@ async def google_callback(
         return templates.TemplateResponse(
             request=request,
             name="auth/login.html",
-            context={"error": "Tu cuenta de Google no tiene el email verificado."},
+            context={"error": "Your Google account email is not verified."},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -214,8 +214,8 @@ async def google_callback(
             name="auth/login.html",
             context={
                 "error": (
-                    "Ya existe una cuenta con este email. Inicia sesión con "
-                    "tu contraseña y vincula Google desde tu perfil."
+                    "An account with this email already exists. Sign in with "
+                    "your password and link Google from your profile."
                 )
             },
             status_code=status.HTTP_409_CONFLICT,
@@ -273,7 +273,7 @@ async def unlink_google(
     if current_user.hashed_password is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No puedes desvincular Google: la cuenta no tiene contraseña.",
+            detail="You cannot unlink Google: the account has no password.",
         )
 
     current_user.oauth_provider = None
