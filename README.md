@@ -5,7 +5,7 @@ rather than in the route handlers.
 
 ## Features
 
-- Three roles (`user`, `moderator`, `admin`) enforced by XACML 3.0   `deny-overrides` policies
+- Three roles (`user`, `moderator`, `admin`) enforced by XACML 3.0`deny-overrides` policies
 - Session authentication with Argon2 password hashes and CSRF-protected forms
 - Optional Google OAuth login, with account linking/unlinking from the profile
 - Uploaded images encrypted at rest with AES-256-GCM; PII and OAuth tokens withFernet
@@ -82,7 +82,6 @@ The FastAPI docs endpoints (`/docs`, `/redoc`, `/openapi.json`) are disabled.
 |----------|----------|
 | [docs/architecture.md](docs/architecture.md) | Components, request flow, XACML model, data model |
 | [docs/configuration.md](docs/configuration.md) | Environment variables and key generation |
-| [docs/security.md](docs/security.md) | Implemented controls and known limitations |
 | [docs/security-testing.md](docs/security-testing.md) | OWASP ZAP scan: how to run and configure |
 | [docs/development.md](docs/development.md) | Routes by role, database, tests and helper tools |
 
