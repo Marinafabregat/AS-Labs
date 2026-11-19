@@ -102,7 +102,7 @@ Attribute helpers (`item_attrs`, `user_profile_attrs`, `user_pii_attrs`, `report
 - Registration enforces at least 8 characters, one uppercase letter, one digit and one special character.
 - Login checks credentials first, then asks XACML (`login` on `user`) whether the account may start a session; the session is cleared and only `user_id` is stored.
 - Google OAuth (`/auth/google` → Google → `/auth/callback`) is optional. Linking and unlinking happen from the profile page, and OAuth tokens are stored encrypted.
-- State-changing handlers verify a per-session CSRF token against the session value. The login and registration POSTs are the exceptions (see [security.md](security.md)).
+- State-changing handlers verify a per-session CSRF token against the session value. The login and registration POSTs are the exceptions.
 
 ## Files and encryption
 
