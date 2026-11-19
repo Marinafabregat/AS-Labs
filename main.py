@@ -6,8 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Cargar las variables de entorno antes de importar módulos
-# que dependan de ellas.
+# Load environment variables before importing modules
+# that depend on them.
 load_dotenv()
 
 from fastapi import Depends, FastAPI, Request
@@ -57,20 +57,20 @@ IN_DOCKER = os.path.exists("/app")
 
 
 def seed_default_data(engine):
-    """Crea los datos iniciales del marketplace."""
+    """Create the initial marketplace data."""
     with Session(engine) as session:
         if session.exec(select(User)).first():
             log.info("Los datos iniciales ya existen.")
             return
 
-        # Guardar las imágenes iniciales cifradas.
-        # save_image debe cifrar los bytes antes de escribirlos en uploads/.
+        # Store the initial images encrypted.
+        # save_image must encrypt the bytes before writing them to uploads/.
         for seed_img in ("keyboard.jpg", "textbook.jpg"):
             src = project_root / "static" / seed_img
             if src.exists():
                 save_image(seed_img, src.read_bytes())
 
-        # Usuarios iniciales.
+        # Initial users.
         admin_user = User(
             username="admin",
             email="admin@marketplace.com",
@@ -115,7 +115,7 @@ def seed_default_data(engine):
         ):
             session.refresh(user)
 
-        # Categorías iniciales.
+        # Initial categories.
         cat_electronics = Category(name="Electronics")
         cat_books = Category(name="Books")
 
@@ -153,7 +153,7 @@ def seed_default_data(engine):
         session.refresh(item1)
         session.refresh(item2)
 
-        # Interacciones de prueba.
+        # Sample interactions.
         session.add_all([
             Like(
                 user_id=buyer_user.id,

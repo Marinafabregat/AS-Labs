@@ -7,13 +7,13 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
-# Cargar .env antes de leer las claves.
+# Load .env before reading the keys.
 load_dotenv()
 
 log = logging.getLogger("crypto")
 IN_DOCKER = os.path.exists("/app")
 
-# Claves SOLO para desarrollo.
+# Development-only keys.
 DEFAULT_PII_KEY = "uV9M0_y2T-Z-X5c70H811vG53_64y5K5-64y5K5-64y="
 DEFAULT_IMAGE_KEY_HEX = (
     "00112233445566778899aabbccddeeff"
@@ -39,7 +39,7 @@ def _require_env_or_dev_default(name: str, default: str) -> str:
     return default
 
 
-# --- 1. PII y tokens: Fernet ---
+# --- 1. PII and tokens: Fernet ---
 
 PII_KEY = _require_env_or_dev_default(
     "PII_ENCRYPTION_KEY",
@@ -62,7 +62,7 @@ def encrypt_pii(text: Optional[str]) -> Optional[str]:
 
 
 def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
-    """Devuelve None si el descifrado falla."""
+    """Return None if decryption fails."""
     if not ciphertext:
         return None
 
@@ -78,7 +78,7 @@ def decrypt_pii(ciphertext: Optional[str]) -> Optional[str]:
         return None
 
 
-# --- 1b. Tokens OAuth: mismo mecanismo ---
+# --- 1b. OAuth tokens: same mechanism ---
 
 def encrypt_secret(text: Optional[str]) -> Optional[str]:
     return encrypt_pii(text)
@@ -88,17 +88,17 @@ def decrypt_secret(ciphertext: Optional[str]) -> Optional[str]:
     return decrypt_pii(ciphertext)
 
 
-# --- 2. Imágenes: AES-256-GCM ---
+# --- 2. Images: AES-256-GCM ---
 
 def _load_image_key() -> bytes:
-    """Carga una clave AES de 32 bytes desde el entorno
-    o utiliza la clave predeterminada únicamente en desarrollo.
+    """Load a 32-byte AES key from the environment
+    or use the default key in development only.
     """
     image_env = os.getenv("IMAGE_ENCRYPTION_KEY")
 
     if image_env:
         try:
-            # La variable de entorno debe contener la clave en Base64.
+            # The environment variable must contain the key in Base64.
             key = base64.b64decode(image_env, validate=True)
         except (ValueError, base64.binascii.Error) as exc:
             raise RuntimeError(
@@ -132,10 +132,10 @@ def encrypt_image(
     image_bytes: bytes,
     aad: Optional[bytes] = None,
 ) -> bytes:
-    """Cifra una imagen con AES-256-GCM.
+    """Encrypt an image with AES-256-GCM.
 
-    Formato almacenado:
-    nonce aleatorio de 12 bytes || ciphertext || tag de 16 bytes.
+    Stored format:
+    random 12-byte nonce || ciphertext || 16-byte tag.
     """
     if not image_bytes:
         return b""
@@ -150,7 +150,7 @@ def decrypt_image(
     encrypted_data: bytes,
     aad: Optional[bytes] = None,
 ) -> bytes:
-    """Descifra una imagen y verifica su autenticidad."""
+    """Decrypt an image and verify its authenticity."""
     if not encrypted_data or len(encrypted_data) < 12 + 16:
         raise ValueError(
             "Encrypted image is truncated or empty"

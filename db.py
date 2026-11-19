@@ -23,7 +23,7 @@ LOCAL_DB_FILE = PROJECT_ROOT / "database.db"
 
 def _resolve_sqlite_url() -> str:
     env_url = os.getenv("DATABASE_URL")
-    # Una ruta /app/... solo tiene sentido dentro del contenedor Docker
+    # An /app/... path only makes sense inside the Docker container
     if env_url and (IN_DOCKER or not env_url.startswith("sqlite:////app/")):
         return env_url
     db_file = Path("/app/database.db") if IN_DOCKER else LOCAL_DB_FILE
