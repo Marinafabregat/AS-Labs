@@ -18,12 +18,9 @@ app reaches the PDP by service name inside the Docker network.
 | `GOOGLE_CLIENT_SECRET` | No | – | Google OAuth client secret. |
 | `GOOGLE_REDIRECT_URI` | No | Generated callback URL | Must match the URI registered in Google Cloud. |
 
-In Docker the app raises `RuntimeError` at startup if `SESSION_SECRET_KEY`,
-`PII_ENCRYPTION_KEY` or `IMAGE_ENCRYPTION_KEY` are missing. Outside Docker it
-logs a warning and falls back to insecure development keys.
+In Docker the app raises `RuntimeError` at startup if `SESSION_SECRET_KEY` `PII_ENCRYPTION_KEY` or `IMAGE_ENCRYPTION_KEY` are missing. Outside Docker it logs a warning and falls back to insecure development keys.
 
-Docker detection is `os.path.exists("/app")`; keep that in mind if you deploy
-outside the provided image.
+Docker detection is `os.path.exists("/app")`; keep that in mind if you deploy outside the provided image.
 
 ## Generating keys
 
@@ -53,17 +50,13 @@ IMAGE_ENCRYPTION_KEY=<generated Base64 key>
    `https://localhost:8000/auth/callback` (or `https://localhost/auth/callback`).
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI`.
 
-Without these values the username/password login still works; only the Google
-button fails.
+Without these values the username/password login still works; only the Google button fails.
 
 ## Database
 
 - SQLite is the default. The file is created on first start and then seeded.
-- To reset the application, stop the stack and delete `database.db` (plus
-  `uploads/*.enc` if you also want to drop images). The next start recreates and
-  seeds everything.
-- `docker-compose.scan.yml` points `DATABASE_URL` at `/tmp/zap-scan.db` so the
-  active scan never touches development data.
+- To reset the application, stop the stack and delete `database.db` (plus `uploads/*.enc` if you also want to drop images). The next start recreates and seeds everything.
+- `docker-compose.scan.yml` points `DATABASE_URL` at `/tmp/zap-scan.db` so the active scan never touches development data.
 
 ## Security note about `.env`
 
@@ -74,5 +67,4 @@ git rm --cached .env
 printf '\n.env\n' >> .gitignore
 ```
 
-Then rotate every key that was committed. Do not rely on the development
-fallback keys outside a local machine.
+Then rotate every key that was committed. Do not rely on the development fallback keys outside a local machine.

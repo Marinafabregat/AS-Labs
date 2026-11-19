@@ -11,8 +11,7 @@ docker compose up -d authzforce   # required: the app denies everything without 
 uvicorn main:app --reload
 ```
 
-Dependencies are pinned nowhere yet; `REQUIREMENTS.txt` lists them without
-versions and keeps the historical uppercase filename used by the Dockerfile.
+Dependencies are pinned nowhere yet; `REQUIREMENTS.txt` lists them without versions and keeps the historical uppercase filename used by the Dockerfile.
 
 ## Routes by role
 
@@ -81,10 +80,7 @@ All paths are relative to the host and port where the app listens.
 
 ## Database
 
-`db.py` creates the engine from `DATABASE_URL`, falling back to SQLite in the
-project directory (or `/app/database.db` in Docker). `init_db()` creates
-missing tables and applies a small in-place migration for the `is_banned`
-column; there is no migration framework.
+`db.py` creates the engine from `DATABASE_URL`, falling back to SQLite in the project directory (or `/app/database.db` in Docker). `init_db()` creates missing tables and applies a small in-place migration for the `is_banned` column; there is no migration framework.
 
 Reset locally:
 
@@ -95,31 +91,16 @@ rm -f uploads/*.enc        # optional: also drops encrypted images
 
 The next start recreates the schema and seeds the four test accounts.
 
-`seed_default_data()` runs only when the database file did not exist, so
-deleting individual rows does not bring them back.
+`seed_default_data()` runs only when the database file did not exist, so deleting individual rows does not bring them back.
 
 ## Tests and helper tools
 
-`pytest`, `pytest-asyncio`, `pytest-cov` and `httpx` are installed, but no test
-suite is committed. The `tools/` directory contains static checks used while
-developing:
-
-| Tool | Purpose |
-|------|---------|
-| `python tools/check_access_bypass.py` | Flags authorization state (`role`, `is_banned`, `is_blacklisted`, ownership) checked outside XACML |
-| `python tools/check_templates.py` | Flags role/ban/ownership conditionals in Jinja templates |
-| `python tools/prove_xacml_source.py` | Compares the running PDP decisions with the policy source for a set of cases (requires AuthzForce) |
+`pytest`, `pytest-asyncio`, `pytest-cov` and `httpx` are installed, but no test suite is committed. The `tools/` directory contains static checks used while developing. 
 
 Run the security scan with `./scripts/run-zap.sh` (see
 [security-testing.md](security-testing.md)).
 
 ## Conventions
 
-- Authorization decisions belong in `authz.py` / the XACML policy, not in
-  templates or route bodies. `tools/check_access_bypass.py` and
-  `tools/check_templates.py` enforce this.
-- New protected resource types need: a policy in `_build_policy_set()`, an
-  attribute helper, and `can()`/`enforce()` calls in the handler.
-- User-facing strings are in English; some log messages remain in Spanish.
-- Keep `marketplace_policy.xml` in sync when changing the policy, even though
-  it is only a reference copy.
+- Authorization decisions belong in `authz.py` / the XACML policy, not in templates or route bodies. `tools/check_access_bypass.py` and `tools/check_templates.py` enforce this.
+- New protected resource types need: a policy in `_build_policy_set()`, an attribute helper, and `can()`/`enforce()` calls in the handler.

@@ -5,10 +5,10 @@ rather than in the route handlers.
 
 ## Features
 
-- Three roles (`user`, `moderator`, `admin`) enforced by XACML 3.0`deny-overrides` policies
-- Session authentication with Argon2 password hashes and CSRF-protected forms
+- Three roles (`user`, `moderator`, `admin`) enforced by XACML 3.0 `deny-overrides` policies
+- Session authentication with Argon2 password hashes
 - Optional Google OAuth login, with account linking/unlinking from the profile
-- Uploaded images encrypted at rest with AES-256-GCM; PII and OAuth tokens withFernet
+- Uploaded images encrypted at rest with AES-256-GCM; PII and OAuth tokens with Fernet
 - Nginx TLS reverse proxy and hardened security headers
 - Authenticated OWASP ZAP scan setup
 
@@ -67,7 +67,7 @@ routes/                  users, items, moderation, admin and OAuth endpoints
 models.py / db.py        SQLModel tables and database engine
 auth.py                  sessions, password hashing, CSRF tokens
 authz.py                 XACML PEP/PAP: policy set, attributes, can()/enforce()
-marketplace_policy.xml   Policy reference copy (generated in authz.py at runtime)
+marketplace_policy.xml   Policy reference copy
 security_encryption.py   Fernet (PII) and AES-256-GCM (images)
 image_storage.py         Encrypted upload storage and legacy migration
 nginx/                   TLS reverse proxy configuration
